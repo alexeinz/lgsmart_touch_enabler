@@ -13,6 +13,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var launchAtLogin = false
     @Published private(set) var loginItemError: String?
     @Published private(set) var displays: [DisplayInfo] = []
+    @Published private(set) var touches: [CGPoint] = []
     @Published private(set) var logs: [LogStore.Entry] = LogStore.shared.snapshot
 
     let store = ConfigStore()
@@ -27,6 +28,7 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async { self?.status = s }
         }
 
+        service.onTouches = { [weak self] pts in self?.touches = pts }
         LogStore.shared.onAppend = { [weak self] entry in
             DispatchQueue.main.async {
                 guard let self else { return }

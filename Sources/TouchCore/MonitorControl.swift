@@ -178,4 +178,48 @@ public enum DDC {
         // reply: [len, 0x02, result, vcp, type, maxHi, maxLo, curHi, curLo, chk]
         return UInt16(reply[8]) << 8 | UInt16(reply[9])
     }
+
+    /// Raw VCP read: current and maximum value, or nil if unsupported / no reply.
+    public static func getRaw(_ code: UInt8) -> (current: UInt16, max: UInt16)? {
+        guard let svc = service(), let write = sym("IOAVServiceWriteI2C", WriteFn.self),
+              let read = sym("IOAVServiceReadI2C", ReadFn.self) else { return nil }
+        var req: [UInt8] = [0x82, 0x01, code]
+        req.append(req.reduce(UInt8(0x6E ^ 0x51), ^))
+        let dbg = ProcessInfo.processInfo.environment["TOUCHD_DDC_DEBUG"] != nil
+        let wr = req.withUnsafeMutableBytes({ write(svc, 0x37, 0x51, $0.baseAddress!, UInt32($0.count)) })
+        if dbg { FileHandle.standardError.write(Data("write rc=\(wr)\n".utf8)) }
+        guard wr == 0 else { return nil }
+        usleep(50_000)
+        var r = [UInt8](repeating: 0, count: 12)
+        let rr = r.withUnsafeMutableBytes({ read(svc, 0x37, 0x51, $0.baseAddress!, UInt32($0.count)) })
+        if dbg { FileHandle.standardError.write(Data("read rc=\(rr)\n".utf8)) }
+        guard rr == 0 else { return nil }
+        if ProcessInfo.processInfo.environment["TOUCHD_DDC_DEBUG"] != nil {
+            FileHandle.standardError.write(Data("VCP 0x\(String(code, radix: 16)) reply: \(r.map { String(format: "%02X", $0) }.joined(separator: " "))\n".utf8))
+        }
+        guard r[3] == 0 else { return nil }   // 0 = ok, 1 = unsupported VCP code
+        return (UInt16(r[8]) << 8 | UInt16(r[9]), UInt16(r[6]) << 8 | UInt16(r[7]))
+    }
+
+    /// The monitor's MCCS capabilities string, e.g. "(prot(monitor)... vcp(10 60(0F 11 12) 62) ...)".
+    public static func capabilities() -> String? {
+        guard let svc = service(), let write = sym("IOAVServiceWriteI2C", WriteFn.self),
+              let read = sym("IOAVServiceReadI2C", ReadFn.self) else { return nil }
+        var out = [UInt8]()
+        var offset = 0
+        while offset < 2048 {
+            var req: [UInt8] = [0x83, 0xF3, UInt8(offset >> 8), UInt8(offset & 0xFF)]
+            req.append(req.reduce(UInt8(0x6E ^ 0x51), ^))
+            guard req.withUnsafeMutableBytes({ write(svc, 0x37, 0x51, $0.baseAddress!, UInt32($0.count)) }) == 0 else { break }
+            usleep(60_000)
+            var r = [UInt8](repeating: 0, count: 40)
+            guard r.withUnsafeMutableBytes({ read(svc, 0x37, 0x51, $0.baseAddress!, UInt32($0.count)) }) == 0 else { break }
+            guard r[2] == 0xE3 else { break }
+            let n = Int(r[1] & 0x7F) - 3
+            if n <= 0 { break }
+            out += r[5..<min(5 + n, r.count)]
+            offset += n
+        }
+        return out.isEmpty ? nil : String(decoding: out, as: UTF8.self)
+    }
 }

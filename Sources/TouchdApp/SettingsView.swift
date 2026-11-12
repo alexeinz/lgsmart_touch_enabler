@@ -2,21 +2,92 @@ import AppKit
 import SwiftUI
 import TouchCore
 
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case general = "General", sensitivity = "Sensitivity", gestures = "Gestures", test = "Test"
+    case monitor = "Monitor", permissions = "Permissions", logs = "Logs"
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .general: "gearshape"
+        case .sensitivity: "slider.horizontal.3"
+        case .gestures: "hand.draw"
+        case .test: "hand.point.up.left"
+        case .monitor: "display"
+        case .permissions: "lock.shield"
+        case .logs: "list.bullet.rectangle"
+        }
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
+    @State private var tab: SettingsTab = .general
+
+    private var missing: [String] {
+        var m: [String] = []
+        if !model.status.accessibility { m.append("Accessibility") }
+        if !model.status.inputMonitoring { m.append("Input Monitoring") }
+        return m
+    }
 
     var body: some View {
-        TabView {
-            GeneralTab().tabItem { Label("General", systemImage: "gearshape") }
-            SensitivityTab().tabItem { Label("Sensitivity", systemImage: "slider.horizontal.3") }
-            GesturesTab().tabItem { Label("Gestures", systemImage: "hand.draw") }
-            MonitorTab().tabItem { Label("Monitor", systemImage: "display") }
-            PermissionsTab().tabItem { Label("Permissions", systemImage: "lock.shield") }
-            LogsTab().tabItem { Label("Logs", systemImage: "list.bullet.rectangle") }
+        VStack(spacing: 0) {
+            if !missing.isEmpty && tab != .permissions { banner }
+            tabBar
+            Divider()
+            Group {
+                switch tab {
+                case .general: GeneralTab()
+                case .sensitivity: SensitivityTab()
+                case .gestures: GesturesTab()
+                case .test: TestPadTab()
+                case .monitor: MonitorTab()
+                case .permissions: PermissionsTab()
+                case .logs: LogsTab()
+                }
+            }
         }
-        .frame(width: 560, height: 500)
-        .padding()
-        .onAppear { model.refresh() }
+        .frame(width: 640, height: 580)
+        .onAppear {
+            model.refresh()
+            if !missing.isEmpty { tab = .permissions }
+        }
+    }
+
+    private var banner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.white)
+            Text("Permission needed: \(missing.joined(separator: " and ")). Touch won't work until it is granted.")
+                .font(.callout.weight(.medium)).foregroundStyle(.white)
+            Spacer()
+            Button("Fix…") { tab = .permissions }.buttonStyle(.borderedProminent).tint(.white).foregroundStyle(.red)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Color.red)
+    }
+
+    private var tabBar: some View {
+        HStack(spacing: 4) {
+            ForEach(SettingsTab.allCases) { t in
+                Button { tab = t } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: t.icon).font(.system(size: 17))
+                        Text(t.rawValue).font(.caption)
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 7)
+                    .foregroundStyle(tab == t ? Color.accentColor : Color.primary)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(tab == t ? Color.accentColor.opacity(0.15) : .clear))
+                    .overlay(alignment: .topTrailing) {
+                        if t == .permissions && !missing.isEmpty {
+                            Circle().fill(.red).frame(width: 9, height: 9).padding(6)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(8)
     }
 }
 
@@ -79,6 +150,7 @@ private struct SensitivityTab: View {
             Section("Gestures") {
                 slider("Swipe distance", $model.config.swipeDistance, 0.02...0.25, "%.0f%% of width", scale: 100)
                 slider("Zoom step", $model.config.zoomStep, 1.05...1.6, "%.2f×")
+                slider("Edge zone", $model.config.edgeWidth, 0.005...0.06, "%.1f%% of width", scale: 100)
             }
             Section {
                 Button("Reset sensitivity to defaults") { model.resetSensitivity() }
@@ -106,8 +178,8 @@ private struct GesturesTab: View {
 
     var body: some View {
         Form {
-            ForEach([2, 3, 4, 5], id: \.self) { n in
-                Section("\(n) fingers") {
+            ForEach([1, 2, 3, 4, 5], id: \.self) { n in
+                Section(n == 1 ? "Edge swipes (1 finger from the screen edge)" : "\(n) fingers") {
                     ForEach(GestureID.allCases.filter { $0.fingers == n }, id: \.self) { g in
                         LabeledContent(g.title) {
                             ShortcutField(shortcut: Binding(
@@ -327,5 +399,51 @@ private struct MonitorTab: View {
         modes = Resolution.modes(for: display)
         current = Resolution.current(for: display)?.id ?? ""
         if let v = Sound.volume { hasSoftwareVolume = true; volume = Double(v); muted = Sound.muted ?? false } else { hasSoftwareVolume = false }
+    }
+}
+
+// MARK: - Touch test pad
+
+private struct TestPadTab: View {
+    @EnvironmentObject var model: AppModel
+    @State private var trail: [[CGPoint]] = []
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Text("Touch the monitor: each contact appears here live, even when touch is disabled. Orientation is the raw digitizer; rotation only affects the cursor.")
+                .font(.caption).foregroundStyle(.secondary)
+            GeometryReader { geo in
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.85))
+                    RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.4))
+                    ForEach(Array(trail.enumerated()), id: \.offset) { age, pts in
+                        ForEach(Array(pts.enumerated()), id: \.offset) { _, p in
+                            Circle().fill(Color.accentColor.opacity(0.06 + 0.012 * Double(age)))
+                                .frame(width: 10, height: 10)
+                                .position(x: p.x * geo.size.width, y: p.y * geo.size.height)
+                        }
+                    }
+                    ForEach(Array(model.touches.enumerated()), id: \.offset) { i, p in
+                        ZStack {
+                            Circle().stroke(Color.white, lineWidth: 2).frame(width: 34, height: 34)
+                            Text("\(i + 1)").font(.caption.bold()).foregroundStyle(.white)
+                        }
+                        .position(x: p.x * geo.size.width, y: p.y * geo.size.height)
+                    }
+                }
+            }
+            HStack {
+                Text("\(model.touches.count) contact\(model.touches.count == 1 ? "" : "s")")
+                    .monospacedDigit()
+                Spacer()
+                Button("Clear trail") { trail.removeAll() }
+            }
+        }
+        .padding()
+        .onChange(of: model.touches) { pts in
+            guard !pts.isEmpty else { return }
+            trail.append(pts)
+            if trail.count > 60 { trail.removeFirst(trail.count - 60) }
+        }
     }
 }

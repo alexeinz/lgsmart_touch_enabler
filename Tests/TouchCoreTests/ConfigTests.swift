@@ -65,7 +65,7 @@ import Testing
 
     @Test func everyGestureHasDefaultAndFingerCount() {
         for g in GestureID.allCases {
-            #expect((2...5).contains(g.fingers))
+            #expect((1...5).contains(g.fingers))
             #expect(!g.title.isEmpty)
         }
     }

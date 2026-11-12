@@ -18,6 +18,8 @@ public final class TouchService {
     public private(set) var config: TouchConfig
     public private(set) var status = ServiceStatus()
     public var onStatus: ((ServiceStatus) -> Void)?
+    /// Raw contacts, normalized 0...1 in the digitizer's own orientation (for the Touch Test pad).
+    public var onTouches: (([CGPoint]) -> Void)?
     public var log: ((String) -> Void)? { didSet { engine.log = log } }
     private let logs = LogStore.shared
     private var lastStartFailed = false
@@ -112,11 +114,13 @@ public final class TouchService {
     // MARK: Touch handling
 
     private func handle(_ normalized: [CGPoint]) {
+        onTouches?(normalized)
         guard config.enabled else { return }
         let touching = !normalized.isEmpty
         if touching && !wasTouching { refreshDisplay() }   // pick up display changes between touches
         wasTouching = touching
         let pts = normalized.map { Displays.map($0, rotation: config.rotation, bounds: bounds) }
+        engine.displayBounds = bounds
         engine.update(points: pts, displayWidth: bounds.width)
     }
 }

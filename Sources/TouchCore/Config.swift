@@ -8,6 +8,7 @@ public enum GestureID: String, CaseIterable, Sendable {
     case swipe4Left, swipe4Right, swipe4Up, swipe4Down
     case pinch4In, pinch4Out
     case swipe5Left, swipe5Right, swipe5Up, swipe5Down
+    case edgeLeft, edgeRight, edgeTop, edgeBottom   // one finger starting at a screen edge, swiping inward
 
     public static let swipeIDs: [Int: [GestureID]] = [
         3: [.swipe3Left, .swipe3Right, .swipe3Up, .swipe3Down],
@@ -18,6 +19,7 @@ public enum GestureID: String, CaseIterable, Sendable {
     /// Number of fingers this gesture is grouped under in the UI.
     public var fingers: Int {
         switch self {
+        case .edgeLeft, .edgeRight, .edgeTop, .edgeBottom: return 1
         case .pinch2In, .pinch2Out: return 2
         case .swipe3Left, .swipe3Right, .swipe3Up, .swipe3Down: return 3
         case .swipe4Left, .swipe4Right, .swipe4Up, .swipe4Down, .pinch4In, .pinch4Out: return 4
@@ -27,6 +29,10 @@ public enum GestureID: String, CaseIterable, Sendable {
 
     public var title: String {
         switch self {
+        case .edgeLeft: return "From left edge"
+        case .edgeRight: return "From right edge"
+        case .edgeTop: return "From top edge"
+        case .edgeBottom: return "From bottom edge"
         case .pinch2In: return "Pinch in"
         case .pinch2Out: return "Spread out"
         case .pinch4In: return "Pinch in (4–5 fingers)"
@@ -41,6 +47,7 @@ public enum GestureID: String, CaseIterable, Sendable {
     public var defaultShortcut: Shortcut {
         let cf = Shortcut.ctrlFn
         switch self {
+        case .edgeLeft, .edgeRight, .edgeTop, .edgeBottom: return .disabled   // opt-in
         case .pinch2In: return Shortcut(keyCode: Shortcut.kMinus, flags: .maskCommand)
         case .pinch2Out: return Shortcut(keyCode: Shortcut.kEqual, flags: .maskCommand)
         case .pinch4In: return Shortcut(keyCode: Shortcut.kF4)
@@ -71,6 +78,7 @@ public struct TouchConfig: Codable, Equatable, Sendable {
     public var doubleTapWindow = 0.4           // seconds
     public var swipeDistance = 0.06            // fraction of display width
     public var zoomStep = 1.15                 // finger-spread ratio per zoom keypress
+    public var edgeWidth = 0.015               // edge-swipe start zone, fraction of display width
 
     // Device (advanced; edit the JSON file)
     public var vendorID = 0x284B
@@ -98,7 +106,7 @@ public struct TouchConfig: Codable, Equatable, Sendable {
         scrollSpeed = d.scrollSpeed; invertScroll = d.invertScroll
         moveThreshold = d.moveThreshold; rightClickOnHold = d.rightClickOnHold
         longPressDelay = d.longPressDelay; doubleTapWindow = d.doubleTapWindow
-        swipeDistance = d.swipeDistance; zoomStep = d.zoomStep
+        swipeDistance = d.swipeDistance; zoomStep = d.zoomStep; edgeWidth = d.edgeWidth
     }
 
     /// Returns a copy with every value forced into a sane range (hand-edited files, old versions).
@@ -111,6 +119,7 @@ public struct TouchConfig: Codable, Equatable, Sendable {
         c.doubleTapWindow = min(max(c.doubleTapWindow, 0.05), 2)
         c.swipeDistance = min(max(c.swipeDistance, 0.01), 0.5)
         c.zoomStep = min(max(c.zoomStep, 1.02), 2)
+        c.edgeWidth = min(max(c.edgeWidth, 0.003), 0.1)
         return c
     }
 
@@ -130,6 +139,7 @@ public struct TouchConfig: Codable, Equatable, Sendable {
         doubleTapWindow = try c.decodeIfPresent(Double.self, forKey: .doubleTapWindow) ?? d.doubleTapWindow
         swipeDistance = try c.decodeIfPresent(Double.self, forKey: .swipeDistance) ?? d.swipeDistance
         zoomStep = try c.decodeIfPresent(Double.self, forKey: .zoomStep) ?? d.zoomStep
+        edgeWidth = try c.decodeIfPresent(Double.self, forKey: .edgeWidth) ?? d.edgeWidth
         vendorID = try c.decodeIfPresent(Int.self, forKey: .vendorID) ?? d.vendorID
         productID = try c.decodeIfPresent(Int.self, forKey: .productID) ?? d.productID
         bindings = try c.decodeIfPresent([String: Shortcut].self, forKey: .bindings) ?? [:]

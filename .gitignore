@@ -3,3 +3,10 @@
 build/
 *.xcodeproj
 .DS_Store
+
+# local prototypes / debug dumps
+legacy/dump.txt
+legacy/touchd
+legacy/touchd.bak-v1
+/touchd
+/touchd.swift

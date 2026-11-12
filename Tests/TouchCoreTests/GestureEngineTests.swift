@@ -167,3 +167,65 @@ import Testing
         #expect(r.sink.keys.isEmpty)
     }
 }
+
+@Suite struct EdgeSwipeTests {
+    static let bounds = CGRect(x: 0, y: 0, width: 3000, height: 1700)
+
+    private func rig(_ id: GestureID? = .edgeLeft) -> Rig {
+        let r = Rig { cfg in if let id { cfg.setShortcut(Shortcut(keyCode: 0x7B, flags: .maskControl), for: id) } }
+        r.engine.displayBounds = Self.bounds
+        return r
+    }
+
+    @Test func leftEdgeSwipeFiresBoundShortcutAndNoClick() {
+        let r = rig(.edgeLeft)
+        r.touch([CGPoint(x: 10, y: 800)])
+        for i in 1...10 { r.touch([CGPoint(x: 10 + CGFloat(i) * 30, y: 800)]) }
+        r.lift()
+        #expect(r.sink.keys == [0x7B])
+        #expect(r.sink.kinds.isEmpty)
+    }
+
+    @Test func edgeSwipesAreDisabledByDefault() {
+        let r = rig(nil)
+        r.touch([CGPoint(x: 10, y: 800)])
+        for i in 1...10 { r.touch([CGPoint(x: 10 + CGFloat(i) * 30, y: 800)]) }
+        r.lift()
+        #expect(r.sink.keys.isEmpty)
+        #expect(r.sink.kinds.contains(.leftDrag))
+    }
+
+    @Test func rightEdgeNeedsInwardMotion() {
+        let r = rig(.edgeRight)
+        r.touch([CGPoint(x: 2990, y: 800)])
+        for i in 1...10 { r.touch([CGPoint(x: 2990 - CGFloat(i) * 30, y: 800)]) }
+        r.lift()
+        #expect(r.sink.keys == [0x7B])
+    }
+
+    @Test func dragAlongTheEdgeStaysADrag() {
+        let r = rig(.edgeLeft)
+        r.touch([CGPoint(x: 10, y: 800)])
+        for i in 1...10 { r.touch([CGPoint(x: 10, y: 800 + CGFloat(i) * 30)]) }
+        r.lift()
+        #expect(r.sink.keys.isEmpty)
+        #expect(r.sink.kinds.contains(.leftDrag))
+    }
+
+    @Test func tapInEdgeZoneStillClicks() {
+        let r = rig(.edgeLeft)
+        r.touch([CGPoint(x: 10, y: 800)])
+        r.lift()
+        #expect(r.sink.kinds.contains(.leftDown))
+        #expect(r.sink.keys.isEmpty)
+    }
+
+    @Test func touchOutsideZoneIsNormalDrag() {
+        let r = rig(.edgeLeft)
+        r.touch([CGPoint(x: 500, y: 800)])
+        for i in 1...10 { r.touch([CGPoint(x: 500 + CGFloat(i) * 30, y: 800)]) }
+        r.lift()
+        #expect(r.sink.keys.isEmpty)
+        #expect(r.sink.kinds.contains(.leftDrag))
+    }
+}

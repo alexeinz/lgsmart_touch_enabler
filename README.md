@@ -6,7 +6,9 @@ A userspace touch driver for macOS. It makes the touchscreen on the **LG 31.5" 4
 - Two-finger drag = scroll, two-finger pinch = zoom
 - 3/4/5-finger swipes and 4-finger pinch fire **configurable keyboard shortcuts**
 - Up to 10 simultaneous contacts are tracked
+- Optional **edge swipes**: one finger from a screen edge inward fires a shortcut (off by default)
 - Settings app: shortcuts, sensitivity, display and rotation, launch at login
+- **Test** tab: live view of every contact, **Logs** tab, and a **Monitor** tab (input switch, resolution, volume)
 - Config is one JSON file, live-reloaded by the daemon
 
 > **Status:** single-touch and two-finger scroll are confirmed on hardware. Multi-finger gestures (pinch, 3/4/5-finger swipes) are covered by unit tests but **not yet verified on the real monitor**. Expect to tweak sensitivity.
@@ -25,6 +27,8 @@ A userspace touch driver for macOS. It makes the touchscreen on the **LG 31.5" 4
 cp -R "build/LG Smart Touch Enabler.app" /Applications/
 open "/Applications/LG Smart Touch Enabler.app"
 ```
+
+Or build a drag-to-install disk image with `./scripts/make-dmg.sh` (`build/LG-Smart-Touch-Enabler-<version>.dmg`; ad-hoc signed, not notarized).
 
 Open **Settings…** from the menu-bar icon, then:
 
@@ -59,16 +63,26 @@ Run only one of the app or the daemon at a time, since both would inject events.
 | 3, 4 or 5 fingers swipe up | ⌃↑ (Mission Control) |
 | 3, 4 or 5 fingers swipe down | ⌃↓ (App Exposé) |
 | 4 fingers pinch in / out | F4 / F11 (Launchpad / Show Desktop) |
+| 1 finger from left / right / top / bottom edge | disabled until you bind a shortcut |
 
 Every binding can be re-recorded, chosen from presets, or disabled in **Settings → Gestures**.
 
 **Mission Control caveat:** the Space and Mission Control defaults are the standard macOS shortcuts. Enable them in System Settings → Keyboard → Keyboard Shortcuts → Mission Control, or the gestures will do nothing.
+
+## Monitor controls
+
+The **Monitor** tab changes resolution and volume, and switches the monitor input over DDC/CI (Apple silicon, private IOAVService). Input codes are the standard MCCS values. **Not working on the test Mac yet:** `touchd ddc` finds the external display but the I2C write is rejected (IOKit error 0xe0114000), so input switching is unverified. Check that DDC/CI is enabled in the monitor's own menu, and try a different cable or port (set `TOUCHD_DDC_DEBUG=1` for raw output). HDMI/DisplayPort audio often has no software volume.
+
+## Hardware limits
+
+The digitizer reports only tip switch, contact ID and X/Y. There is no pressure or contact size, so pressure sensitivity and palm rejection are not possible.
 
 ## CLI
 
 ```bash
 touchd run             # run the daemon in the foreground
 touchd status          # permissions, device, display
+touchd ddc             # probe the monitor over DDC/CI
 touchd dump            # print raw HID reports (debugging)
 touchd config path     # location of the config file
 touchd config print
@@ -85,8 +99,8 @@ touchd config reset
 Sources/TouchCore/    gesture engine, config, HID source, CG event output (library, unit-tested)
 Sources/touchd/       CLI daemon
 Sources/TouchdApp/    SwiftUI menu-bar settings app
-Tests/TouchCoreTests/ Swift Testing suite (30 tests)
-scripts/              build-app.sh, install-launchagent.sh, test.sh
+Tests/TouchCoreTests/ Swift Testing suite (36 tests)
+scripts/              build-app.sh, make-dmg.sh, install-launchagent.sh, test.sh
 legacy/               original single-file prototypes, kept for reference
 ```
 

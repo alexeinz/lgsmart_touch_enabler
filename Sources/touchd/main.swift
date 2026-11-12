@@ -8,6 +8,7 @@ USAGE: touchd [command]
 
   run (default)   Start the driver in the foreground (Ctrl-C to quit)
   status          Show permissions, display and configuration summary
+  ddc [input HEX] Probe the monitor over DDC/CI (inputs, capabilities); optionally switch input
   dump            Print raw HID values from the touchscreen (for debugging)
   config path     Print the config file location
   config print    Print the effective configuration as JSON
@@ -53,6 +54,18 @@ case "status":
         print("\(mark) display \(d.id): \(d.name)\(d.isBuiltin ? " (built-in)" : "") \(Int(d.bounds.width))x\(Int(d.bounds.height))")
     }
     print("Rotation:           \(cfg.rotation)°  Scroll speed: \(cfg.scrollSpeed)x  Gestures: \(cfg.gesturesEnabled ? "on" : "off")")
+
+case "ddc":
+    guard DDC.isSupported else { fail("No external display reachable over DDC/CI (Apple silicon only).") }
+    if let v = DDC.getRaw(0x60) { print(String(format: "Input (VCP 0x60): current=0x%02X max=0x%02X", v.current, v.max)) }
+    else { print("Input (VCP 0x60): no reply") }
+    for (n, c) in [("Brightness (0x10)", UInt8(0x10)), ("Volume (0x62)", 0x62), ("Mute (0x8D)", 0x8D)] {
+        if let v = DDC.getRaw(c) { print("\(n): current=\(v.current) max=\(v.max)") } else { print("\(n): unsupported") }
+    }
+    print("Capabilities: \(DDC.capabilities() ?? "no reply")")
+    if args.count == 3, args[1] == "input", let code = UInt16(args[2].replacingOccurrences(of: "0x", with: ""), radix: 16) {
+        print("Switching input to 0x\(String(code, radix: 16))…"); DDC.set(.input, code)
+    }
 
 case "dump":
     let cfg = store.load()

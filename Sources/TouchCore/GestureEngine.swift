@@ -24,6 +24,8 @@ public final class GestureEngine {
     private let schedule: Scheduler
     private let now: () -> Date
     public var log: ((String) -> Void)?
+    /// Display rectangle in the same coordinate space as the points. `.zero` disables edge swipes.
+    public var displayBounds = CGRect.zero
 
     private var mode = Mode.idle
     private var twoMode = TwoMode.undecided
@@ -35,6 +37,7 @@ public final class GestureEngine {
     private var lastC = CGPoint.zero      // last centroid, for scrolling
     private var multiN = 0
     private var fired = false
+    private var edgeStart: GestureID?     // set while a single finger that began at an enabled edge is still pending
     private var lastTapTime = Date.distantPast
     private var lastTapPt = CGPoint.zero
     private var cancelLongPress: Cancel?
@@ -74,6 +77,7 @@ public final class GestureEngine {
 
         case .pending:
             if n == 1 {
+                if let edge = edgeStart, checkEdge(edge, pts[0], W, cfg) { break }
                 if Self.dist(pts[0], startPt) > CGFloat(cfg.moveThreshold) {
                     endLongPress()
                     sink.mouse(.leftDown, at: startPt, clicks: 1)
@@ -106,7 +110,7 @@ public final class GestureEngine {
     public func reset() {
         endLongPress()
         if mode == .dragging { sink.mouse(.leftUp, at: lastPt, clicks: 1) }
-        mode = .idle; fired = false; multiN = 0
+        mode = .idle; fired = false; multiN = 0; edgeStart = nil
         scrollRemX = 0; scrollRemY = 0
     }
 
@@ -115,6 +119,7 @@ public final class GestureEngine {
     private func beginPending(_ p: CGPoint, _ cfg: TouchConfig) {
         startPt = p; lastPt = p
         mode = .pending
+        edgeStart = edgeZone(p, cfg)
         if cfg.rightClickOnHold {
             cancelLongPress = schedule(cfg.longPressDelay) { [weak self] in self?.longPressFired() }
         }
@@ -126,6 +131,42 @@ public final class GestureEngine {
         sink.mouse(.rightDown, at: startPt, clicks: 1)
         sink.mouse(.rightUp, at: startPt, clicks: 1)
         mode = .consumed
+    }
+
+    /// Which enabled edge zone `p` starts in, if any.
+    private func edgeZone(_ p: CGPoint, _ cfg: TouchConfig) -> GestureID? {
+        let b = displayBounds
+        guard cfg.gesturesEnabled, b.width > 0, b.height > 0 else { return nil }
+        let w = CGFloat(cfg.edgeWidth) * b.width
+        let candidates: [(GestureID, Bool)] = [
+            (.edgeLeft, p.x - b.minX <= w), (.edgeRight, b.maxX - p.x <= w),
+            (.edgeTop, p.y - b.minY <= w), (.edgeBottom, b.maxY - p.y <= w),
+        ]
+        return candidates.first { $0.1 && !cfg.shortcut(for: $0.0).isDisabled }?.0
+    }
+
+    /// Handles a pending finger that started at an edge. Returns true while it owns the gesture
+    /// (fired, or still moving inward). Motion that isn't mostly inward cancels it and becomes a normal drag.
+    private func checkEdge(_ edge: GestureID, _ p: CGPoint, _ W: CGFloat, _ cfg: TouchConfig) -> Bool {
+        let dx = p.x - startPt.x, dy = p.y - startPt.y
+        let inward: CGFloat
+        switch edge {
+        case .edgeLeft: inward = dx
+        case .edgeRight: inward = -dx
+        case .edgeTop: inward = dy
+        default: inward = -dy
+        }
+        let d = Self.dist(p, startPt)
+        if inward > CGFloat(cfg.swipeDistance) * W {
+            endLongPress()
+            log?(edge.rawValue)
+            fire(edge, cfg)
+            mode = .consumed
+            edgeStart = nil
+            return true
+        }
+        if d > CGFloat(cfg.moveThreshold) && inward < 0.7 * d { edgeStart = nil; return false }
+        return d <= CGFloat(cfg.moveThreshold) || inward >= 0.7 * d
     }
 
     private func endLongPress() { cancelLongPress?(); cancelLongPress = nil }
@@ -158,7 +199,7 @@ public final class GestureEngine {
         } else if mode == .dragging {
             sink.mouse(.leftUp, at: lastPt, clicks: 1)
         }
-        mode = .idle; fired = false; multiN = 0
+        mode = .idle; fired = false; multiN = 0; edgeStart = nil
         scrollRemX = 0; scrollRemY = 0
     }
 
