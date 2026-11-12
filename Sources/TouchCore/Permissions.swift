@@ -43,6 +43,32 @@ public enum Permissions {
         return fresh
     }
 
+    /// TCC service names for the two grants, as `tccutil` spells them.
+    public static let tccServices = ["Accessibility", "ListenEvent"]
+
+    /// One `tccutil` argument list per grant. macOS keeps grants after an app is deleted or re-signed,
+    /// so stale entries have to be removed explicitly.
+    public static func resetArguments(bundleID: String) -> [[String]] {
+        tccServices.map { ["reset", $0, bundleID] }
+    }
+
+    /// Removes this bundle ID's Accessibility and Input Monitoring entries. Returns false if any reset failed.
+    /// The running process keeps its cached state, so relaunch (or quit) afterwards.
+    @discardableResult
+    public static func reset(bundleID: String) -> Bool {
+        var ok = true
+        for args in resetArguments(bundleID: bundleID) {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            task.arguments = args
+            task.standardOutput = FileHandle.nullDevice
+            task.standardError = FileHandle.nullDevice
+            do { try task.run(); task.waitUntilExit() } catch { ok = false; continue }
+            if task.terminationStatus != 0 { ok = false }
+        }
+        return ok
+    }
+
     public static let accessibilitySettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
     public static let inputMonitoringSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
 }

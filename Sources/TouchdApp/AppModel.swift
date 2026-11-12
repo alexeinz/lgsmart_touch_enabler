@@ -12,6 +12,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var status = ServiceStatus()
     @Published private(set) var launchAtLogin = false
     @Published private(set) var loginItemError: String?
+    @Published private(set) var uninstallError: String?
     @Published private(set) var displays: [DisplayInfo] = []
     @Published private(set) var touches: [CGPoint] = []
     @Published private(set) var logs: [LogStore.Entry] = LogStore.shared.snapshot
@@ -88,6 +89,33 @@ final class AppModel: ObservableObject {
         task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         task.arguments = ["-n", Bundle.main.bundlePath]
         try? task.run()
+        NSApp.terminate(nil)
+    }
+
+    /// Nil when not running from a bundle (e.g. `swift run`), where there is nothing to reset or uninstall.
+    var bundleID: String? { Bundle.main.bundleIdentifier }
+    var canUninstall: Bool { bundleID != nil && Bundle.main.bundleURL.pathExtension == "app" }
+
+    /// Clears this app's Accessibility and Input Monitoring entries, then relaunches so macOS asks again.
+    func resetPermissions() {
+        guard let id = bundleID else { return }
+        LogStore.shared.log(Permissions.reset(bundleID: id) ? "Permissions reset" : "Permission reset failed", .warn)
+        relaunch()
+    }
+
+    /// Removes the login item and the privacy grants, moves the app to the Trash and quits.
+    /// macOS does none of this when an app is simply dragged to the Trash. The config file is kept.
+    func uninstall() {
+        guard canUninstall, let id = bundleID else { return }
+        service.stop()
+        try? SMAppService.mainApp.unregister()
+        Permissions.reset(bundleID: id)
+        do {
+            try FileManager.default.trashItem(at: Bundle.main.bundleURL, resultingItemURL: nil)
+        } catch {
+            uninstallError = "Permissions and the login item were removed, but the app could not be moved to the Trash: \(error.localizedDescription)"
+            return
+        }
         NSApp.terminate(nil)
     }
 

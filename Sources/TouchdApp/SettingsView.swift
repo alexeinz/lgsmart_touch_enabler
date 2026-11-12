@@ -265,6 +265,8 @@ private struct GesturesTab: View {
 
 private struct PermissionsTab: View {
     @EnvironmentObject var model: AppModel
+    @State private var confirmReset = false
+    @State private var confirmUninstall = false
 
     var body: some View {
         Form {
@@ -295,6 +297,31 @@ private struct PermissionsTab: View {
                     Text("Add LG Smart Touch Enabler under Privacy & Security → Input Monitoring and switch it on, then relaunch. If it is listed but still missing after a rebuild, remove it with “−” and add it again.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+            }
+            Section("Reset") {
+                LabeledContent("Permissions") {
+                    Button("Reset Permissions…") { confirmReset = true }.disabled(model.bundleID == nil)
+                }
+                Text("Clears this app's Accessibility and Input Monitoring entries and relaunches so you can grant them again. Use this when the switches are on in System Settings but show as missing here.")
+                    .font(.caption).foregroundStyle(.secondary)
+                LabeledContent("Uninstall") {
+                    Button("Uninstall…", role: .destructive) { confirmUninstall = true }.disabled(!model.canUninstall)
+                }
+                Text("Removes the login item and both permissions, then moves the app to the Trash. macOS keeps the permissions if you only drag the app to the Trash.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let err = model.uninstallError {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
+            }
+            .confirmationDialog("Reset permissions?", isPresented: $confirmReset) {
+                Button("Reset and Relaunch", role: .destructive) { model.resetPermissions() }
+            } message: {
+                Text("Touch input stops until you grant Accessibility and Input Monitoring again.")
+            }
+            .confirmationDialog("Uninstall LG Smart Touch Enabler?", isPresented: $confirmUninstall) {
+                Button("Uninstall", role: .destructive) { model.uninstall() }
+            } message: {
+                Text("The app is moved to the Trash and its permissions and login item are removed. Your settings file is kept.")
             }
             Section("About") {
                 LabeledContent("Config file") {

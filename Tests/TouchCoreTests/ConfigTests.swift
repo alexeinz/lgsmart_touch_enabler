@@ -2,6 +2,15 @@ import CoreGraphics
 import Testing
 @testable import TouchCore
 
+@Suite struct PermissionsTests {
+    @Test func resetCoversBothGrantsForTheBundle() {
+        #expect(Permissions.resetArguments(bundleID: "com.example.app") == [
+            ["reset", "Accessibility", "com.example.app"],
+            ["reset", "ListenEvent", "com.example.app"],
+        ])
+    }
+}
+
 @Suite struct ConfigTests {
     @Test func roundTrip() throws {
         var c = TouchConfig()

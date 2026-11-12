@@ -13,7 +13,7 @@
 
 ## Download
 
-Grab the latest `.dmg` from the [Releases page](https://github.com/alexeinz/lgsmart_touch_enabler/releases/latest), drag the app to Applications, then grant **Accessibility** and **Input Monitoring** in the Permissions tab. The build is ad-hoc signed and not notarized, so the first time use right-click > Open.
+Grab the latest `.dmg` from the [Releases page](https://github.com/alexeinz/lgsmart_touch_enabler/releases/latest), drag the app to Applications, then grant **Accessibility** and **Input Monitoring** in the Permissions tab. The build is not notarized, so the first time use right-click > Open. Releases after v2.1.0 are signed with one stable self-signed certificate, so permissions survive updates; coming from v2.1.0 or earlier you grant them one last time (see Troubleshooting if stale entries linger).
 
 A userspace touch driver for macOS. It makes the touchscreen on the **LG 31.5" 4K Smart Monitor Swing** (MFTouch HID digitizer, `VID 0x284B / PID 0x8300`) work as a real touch input, which macOS does not support natively. It ships a menu-bar settings app and a headless daemon.
 
@@ -123,7 +123,7 @@ touchd config reset
 Sources/TouchCore/    gesture engine, config, HID source, CG event output (library, unit-tested)
 Sources/touchd/       CLI daemon
 Sources/TouchdApp/    SwiftUI menu-bar settings app
-Tests/TouchCoreTests/ Swift Testing suite (61 tests)
+Tests/TouchCoreTests/ Swift Testing suite (62 tests)
 scripts/              build-app.sh, setup-signing.sh, make-dmg.sh, install-launchagent.sh, test.sh
 legacy/               original single-file prototypes, kept for reference
 ```
@@ -141,6 +141,8 @@ swift build
 
 - **Nothing happens on touch:** run `touchd status` or check the Permissions tab. Both Accessibility and Input Monitoring are required.
 - **After a rebuild permissions stopped working:** run `./scripts/setup-signing.sh` once, rebuild, and grant permissions again (the first time only). If the app is missing from Input Monitoring, run `tccutil reset ListenEvent com.touchd.app` and relaunch.
+- **After an update the toggles are on but the app says "Missing":** the entries belong to an older, differently signed build. Click **Reset Permissions…** in the Permissions tab (or run `tccutil reset Accessibility com.touchd.app` and `tccutil reset ListenEvent com.touchd.app`), then grant again after the relaunch.
+- **Uninstalling:** use **Uninstall…** in the Permissions tab. It removes the login item and both permissions, then moves the app to the Trash. macOS keeps the permissions if you only drag the app to the Trash; the two `tccutil` commands above clean up afterwards. The config file is left in place.
 - **Touch lands on the wrong display or is rotated:** pick the display and rotation in Settings → General.
 - **Swipes do nothing:** see the Mission Control caveat above.
 - **Different monitor:** see [Adding another touch screen](docs/ADDING_SCREENS.md) (find the VID/PID, verify with `touchd dump`, map display and rotation).

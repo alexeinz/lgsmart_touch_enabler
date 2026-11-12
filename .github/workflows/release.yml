@@ -12,12 +12,34 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test
         run: swift test
+      # A stable certificate keeps the app's identity the same across releases, so macOS privacy grants
+      # (Accessibility, Input Monitoring) survive updates. Without the secrets the build is ad-hoc signed.
+      - name: Import signing certificate
+        env:
+          SIGNING_P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
+          SIGNING_P12_PASSWORD: ${{ secrets.SIGNING_P12_PASSWORD }}
+        run: |
+          if [ -z "$SIGNING_P12_BASE64" ]; then
+            echo "::warning::No signing certificate secret; building ad-hoc signed."; exit 0
+          fi
+          KC="$RUNNER_TEMP/signing.keychain-db"
+          KCPW="$(openssl rand -hex 16)"
+          echo "$SIGNING_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/id.p12"
+          security create-keychain -p "$KCPW" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KCPW" "$KC"
+          security import "$RUNNER_TEMP/id.p12" -k "$KC" -P "$SIGNING_P12_PASSWORD" -T /usr/bin/codesign >/dev/null
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KCPW" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/id.p12"
+          echo "CODESIGN_IDENTITY=LG Smart Touch Enabler Release" >> "$GITHUB_ENV"
       - name: Build app and DMG
         env:
           # Tag builds are named after the tag; manual runs fall back to the latest tag or 0.0.0.
           VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
         run: |
           ./scripts/build-app.sh
+          codesign -dr - "build/LG Smart Touch Enabler.app"
           ./scripts/make-dmg.sh
           cd build && shasum -a 256 *.dmg > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4

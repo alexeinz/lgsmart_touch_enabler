@@ -19,4 +19,4 @@ ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
 hdiutil create -volname "$NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 echo "Built $DMG"
-echo "Note: ad-hoc signed and not notarized; on another Mac use right-click > Open the first time."
+echo "Note: not notarized; on another Mac use right-click > Open the first time."
