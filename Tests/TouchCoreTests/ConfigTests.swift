@@ -17,6 +17,13 @@ import Testing
         #expect(c.enabled)
     }
 
+    @Test func newGestureTogglesDefaultOnAndDecode() throws {
+        let d = try Fixture.decode("{}")
+        #expect(d.momentumScroll && d.twoFingerTapRightClick)
+        let c = try Fixture.decode(#"{"momentumScroll": false}"#)
+        #expect(!c.momentumScroll && c.twoFingerTapRightClick)
+    }
+
     @Test func storeSaveLoad() {
         let store = ConfigStore(url: Fixture.tempURL())
         #expect(!store.exists)

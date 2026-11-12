@@ -228,4 +228,80 @@ import Testing
         #expect(r.sink.keys.isEmpty)
         #expect(r.sink.kinds.contains(.leftDrag))
     }
+
+    @Test func quickTwoFingerTapRightClicks() {
+        let r = Rig()
+        r.touch([CGPoint(x: 500, y: 500), CGPoint(x: 600, y: 500)])
+        r.clock.advance(0.08)
+        r.touch([CGPoint(x: 500, y: 500)])
+        r.lift()
+        #expect(r.sink.kinds.contains(.rightDown))
+        #expect(!r.sink.kinds.contains(.leftDown))
+    }
+
+    @Test func slowTwoFingerHoldDoesNotRightClick() {
+        let r = Rig()
+        r.touch([CGPoint(x: 500, y: 500), CGPoint(x: 600, y: 500)])
+        r.clock.advance(0.6)
+        r.lift()
+        #expect(!r.sink.kinds.contains(.rightDown))
+    }
+
+    @Test func twoFingerTapCanBeDisabled() {
+        let r = Rig { $0.twoFingerTapRightClick = false }
+        r.touch([CGPoint(x: 500, y: 500), CGPoint(x: 600, y: 500)])
+        r.clock.advance(0.05)
+        r.lift()
+        #expect(r.sink.kinds.isEmpty)
+    }
+
+    private func flick(_ r: Rig) {
+        r.touch([CGPoint(x: 500, y: 500), CGPoint(x: 600, y: 500)])
+        for i in 1...8 {
+            r.clock.advance(0.016)
+            let dy = CGFloat(i) * 25
+            r.touch([CGPoint(x: 500, y: 500 + dy), CGPoint(x: 600, y: 500 + dy)])
+        }
+    }
+
+    @Test func fastFlickCoastsAfterRelease() {
+        let r = Rig()
+        flick(r)
+        let before = r.sink.scrolls.count
+        r.touch([CGPoint(x: 500, y: 700)])   // one finger lifts, still moving
+        r.clock.advance(0.5)
+        #expect(r.sink.scrolls.count > before)
+    }
+
+    @Test func momentumStopsOnNewTouchAndWhenDisabled() {
+        let r = Rig()
+        flick(r)
+        r.touch([CGPoint(x: 500, y: 700)])
+        r.clock.advance(0.1)
+        let n = r.sink.scrolls.count
+        r.touch([CGPoint(x: 900, y: 900)])   // new touch cancels coasting
+        r.clock.advance(0.5)
+        #expect(r.sink.scrolls.count == n)
+
+        let off = Rig { $0.momentumScroll = false }
+        flick(off)
+        let m = off.sink.scrolls.count
+        off.touch([CGPoint(x: 500, y: 700)])
+        off.clock.advance(0.5)
+        #expect(off.sink.scrolls.count == m)
+    }
+
+    @Test func slowScrollDoesNotCoast() {
+        let r = Rig()
+        r.touch([CGPoint(x: 500, y: 500), CGPoint(x: 600, y: 500)])
+        for i in 1...8 {
+            r.clock.advance(0.2)
+            let dy = CGFloat(i) * 4
+            r.touch([CGPoint(x: 500, y: 500 + dy), CGPoint(x: 600, y: 500 + dy)])
+        }
+        let before = r.sink.scrolls.count
+        r.touch([CGPoint(x: 500, y: 532)])
+        r.clock.advance(0.5)
+        #expect(r.sink.scrolls.count == before)
+    }
 }

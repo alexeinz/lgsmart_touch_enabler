@@ -72,6 +72,8 @@ public struct TouchConfig: Codable, Equatable, Sendable {
     // Sensitivity
     public var scrollSpeed = 1.0               // multiplier
     public var invertScroll = false
+    public var momentumScroll = true           // keep scrolling briefly after a flick
+    public var twoFingerTapRightClick = true   // quick two-finger tap = right-click
     public var moveThreshold = 8.0             // points before a touch becomes a drag
     public var rightClickOnHold = true
     public var longPressDelay = 0.6            // seconds
@@ -104,6 +106,7 @@ public struct TouchConfig: Codable, Equatable, Sendable {
     public mutating func resetSensitivity() {
         let d = TouchConfig()
         scrollSpeed = d.scrollSpeed; invertScroll = d.invertScroll
+        momentumScroll = d.momentumScroll; twoFingerTapRightClick = d.twoFingerTapRightClick
         moveThreshold = d.moveThreshold; rightClickOnHold = d.rightClickOnHold
         longPressDelay = d.longPressDelay; doubleTapWindow = d.doubleTapWindow
         swipeDistance = d.swipeDistance; zoomStep = d.zoomStep; edgeWidth = d.edgeWidth
@@ -133,6 +136,8 @@ public struct TouchConfig: Codable, Equatable, Sendable {
         rotation = try c.decodeIfPresent(Int.self, forKey: .rotation) ?? d.rotation
         scrollSpeed = try c.decodeIfPresent(Double.self, forKey: .scrollSpeed) ?? d.scrollSpeed
         invertScroll = try c.decodeIfPresent(Bool.self, forKey: .invertScroll) ?? d.invertScroll
+        momentumScroll = try c.decodeIfPresent(Bool.self, forKey: .momentumScroll) ?? d.momentumScroll
+        twoFingerTapRightClick = try c.decodeIfPresent(Bool.self, forKey: .twoFingerTapRightClick) ?? d.twoFingerTapRightClick
         moveThreshold = try c.decodeIfPresent(Double.self, forKey: .moveThreshold) ?? d.moveThreshold
         rightClickOnHold = try c.decodeIfPresent(Bool.self, forKey: .rightClickOnHold) ?? d.rightClickOnHold
         longPressDelay = try c.decodeIfPresent(Double.self, forKey: .longPressDelay) ?? d.longPressDelay

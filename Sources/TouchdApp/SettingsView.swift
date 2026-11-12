@@ -17,6 +17,17 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .logs: "list.bullet.rectangle"
         }
     }
+    var tint: Color {
+        switch self {
+        case .general: Color(red: 0.35, green: 0.45, blue: 0.95)
+        case .sensitivity: .orange
+        case .gestures: Color(red: 0.70, green: 0.35, blue: 0.95)
+        case .test: .green
+        case .monitor: Color(red: 0.10, green: 0.65, blue: 0.95)
+        case .permissions: Color(red: 1.0, green: 0.30, blue: 0.45)
+        case .logs: .teal
+        }
+    }
 }
 
 struct SettingsView: View {
@@ -57,8 +68,11 @@ struct SettingsView: View {
     private var banner: some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.white)
-            Text("Permission needed: \(missing.joined(separator: " and ")). Touch won't work until it is granted.")
-                .font(.callout.weight(.medium)).foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Permission needed").font(.callout.weight(.semibold))
+                Text("\(missing.joined(separator: " and ")) not granted. Touch is off until then.").font(.caption)
+            }
+            .foregroundStyle(.white).lineLimit(1)
             Spacer()
             Button("Fix…") { tab = .permissions }.buttonStyle(.borderedProminent).tint(.white).foregroundStyle(.red)
         }
@@ -70,13 +84,19 @@ struct SettingsView: View {
         HStack(spacing: 4) {
             ForEach(SettingsTab.allCases) { t in
                 Button { tab = t } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: t.icon).font(.system(size: 17))
-                        Text(t.rawValue).font(.caption)
+                    VStack(spacing: 4) {
+                        Image(systemName: t.icon)
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                            .frame(width: 26, height: 22)
+                            .background(RoundedRectangle(cornerRadius: 6)
+                                .fill(LinearGradient(colors: [t.tint.opacity(0.75), t.tint], startPoint: .top, endPoint: .bottom)))
+                            .shadow(color: t.tint.opacity(tab == t ? 0.5 : 0), radius: 4, y: 1)
+                        Text(t.rawValue).font(.caption.weight(tab == t ? .semibold : .regular)).lineLimit(1).minimumScaleFactor(0.8)
                     }
-                    .frame(maxWidth: .infinity).padding(.vertical, 7)
-                    .foregroundStyle(tab == t ? Color.accentColor : Color.primary)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(tab == t ? Color.accentColor.opacity(0.15) : .clear))
+                    .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52, alignment: .center)
+                    .foregroundStyle(tab == t ? t.tint : Color.primary)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(tab == t ? t.tint.opacity(0.14) : .clear))
+                    .animation(.easeOut(duration: 0.15), value: tab)
                     .overlay(alignment: .topTrailing) {
                         if t == .permissions && !missing.isEmpty {
                             Circle().fill(.red).frame(width: 9, height: 9).padding(6)
@@ -139,10 +159,12 @@ private struct SensitivityTab: View {
             Section("Scrolling") {
                 slider("Scroll speed", $model.config.scrollSpeed, 0.25...4, "%.2f×")
                 Toggle("Invert scroll direction", isOn: $model.config.invertScroll)
+                Toggle("Momentum (keep scrolling after a flick)", isOn: $model.config.momentumScroll)
             }
             Section("Tapping") {
                 slider("Drag threshold", $model.config.moveThreshold, 2...40, "%.0f pt")
                 slider("Double-tap window", $model.config.doubleTapWindow, 0.15...1, "%.2f s")
+                Toggle("Two-finger tap to right-click", isOn: $model.config.twoFingerTapRightClick)
                 Toggle("Hold to right-click", isOn: $model.config.rightClickOnHold)
                 slider("Hold duration", $model.config.longPressDelay, 0.3...2, "%.2f s")
                     .disabled(!model.config.rightClickOnHold)
@@ -316,6 +338,7 @@ private struct LogsTab: View {
                 }
                 Button("Clear") { model.clearLogs() }
             }
+            .padding(.horizontal, 16).padding(.bottom, 12)
         }
         .padding(.top, 4)
     }
@@ -369,7 +392,11 @@ private struct MonitorTab: View {
                 }
                 if DDC.isSupported {
                     Slider(value: $ddcVolume, in: 0...100, step: 1) { Text("Monitor volume") }
-                        .onChange(of: ddcVolume) { v in DDC.set(.volume, UInt16(v)) }
+                        .onChange(of: ddcVolume) { v in
+                            let ok = DDC.set(.volume, UInt16(v))
+                            message = ok ? "" : "The monitor rejected the volume command. Turn on DDC/CI in the monitor's own menu (Settings → General), then try again. Until then, use the monitor's remote or buttons for volume."
+                            if !ok { LogStore.shared.log("Monitor volume write rejected (DDC/CI off?)", .error) }
+                        }
                 }
             }
             Section("Input source (DDC/CI)") {

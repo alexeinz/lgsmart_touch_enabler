@@ -1,9 +1,24 @@
-# LG Smart Touch Enabler (touchd)
+<p align="center"><img src="docs/icon.png" width="120" alt="LG Smart Touch Enabler icon"></p>
+
+<h1 align="center">LG Smart Touch Enabler</h1>
+
+<p align="center">
+  <a href="https://github.com/alexeinz/lgsmart_touch_enabler/actions/workflows/ci.yml"><img src="https://github.com/alexeinz/lgsmart_touch_enabler/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/alexeinz/lgsmart_touch_enabler/releases/latest"><img src="https://img.shields.io/github/v/release/alexeinz/lgsmart_touch_enabler?label=download&color=blue" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-13%2B-black" alt="macOS 13+">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT">
+</p>
+
+<p align="center"><b>Make the touchscreen on your LG Smart Monitor Swing work on a Mac.</b><br>Tap, drag, scroll with momentum, pinch, right-click, multi-finger shortcuts and edge swipes, from a menu-bar app.</p>
+
+## Download
+
+Grab the latest `.dmg` from the [Releases page](https://github.com/alexeinz/lgsmart_touch_enabler/releases/latest), drag the app to Applications, then grant **Accessibility** and **Input Monitoring** in the Permissions tab. The build is ad-hoc signed and not notarized, so the first time use right-click > Open.
 
 A userspace touch driver for macOS. It makes the touchscreen on the **LG 31.5" 4K Smart Monitor Swing** (MFTouch HID digitizer, `VID 0x284B / PID 0x8300`) work as a real touch input, which macOS does not support natively. It ships a menu-bar settings app and a headless daemon.
 
 - Tap = click, drag = drag, hold = right-click, double-tap = double-click
-- Two-finger drag = scroll, two-finger pinch = zoom
+- Two-finger drag = scroll (with momentum after a flick), two-finger tap = right-click, two-finger pinch = zoom
 - 3/4/5-finger swipes and 4-finger pinch fire **configurable keyboard shortcuts**
 - Up to 10 simultaneous contacts are tracked
 - Optional **edge swipes**: one finger from a screen edge inward fires a shortcut (off by default)
@@ -35,11 +50,13 @@ Open **Settings…** from the menu-bar icon, then:
 1. **Permissions** tab: grant **Accessibility** and **Input Monitoring**.
 2. **General** tab: turn on **Launch at login**.
 
-The app is ad-hoc signed by default, and macOS ties permissions to the signature. If you rebuild, the grants may reset. To keep them, sign with a stable identity:
+macOS ties permissions to the code signature, and ad-hoc signing changes it every build. Run this once to create a stable self-signed certificate; `build-app.sh` then uses it automatically and your grants survive rebuilds:
 
 ```bash
-CODESIGN_IDENTITY="Apple Development: you@example.com (TEAMID)" ./scripts/build-app.sh
+./scripts/setup-signing.sh
 ```
+
+Or sign with your own identity: `CODESIGN_IDENTITY="Apple Development: you@example.com (TEAMID)" ./scripts/build-app.sh`.
 
 ### Option B: headless daemon
 
@@ -57,7 +74,8 @@ Run only one of the app or the daemon at a time, since both would inject events.
 | Gesture | Default action |
 |---|---|
 | 1 finger tap / drag / hold | click / drag / right-click |
-| 2 fingers drag | scroll (natural direction, invertible) |
+| 2 fingers drag | scroll (natural direction, invertible), coasts after a flick |
+| 2 fingers quick tap | right-click |
 | 2 fingers pinch in / out | ⌘− / ⌘= (zoom) |
 | 3, 4 or 5 fingers swipe left / right | ⌃→ / ⌃← (next / previous Space) |
 | 3, 4 or 5 fingers swipe up | ⌃↑ (Mission Control) |
@@ -99,8 +117,8 @@ touchd config reset
 Sources/TouchCore/    gesture engine, config, HID source, CG event output (library, unit-tested)
 Sources/touchd/       CLI daemon
 Sources/TouchdApp/    SwiftUI menu-bar settings app
-Tests/TouchCoreTests/ Swift Testing suite (36 tests)
-scripts/              build-app.sh, make-dmg.sh, install-launchagent.sh, test.sh
+Tests/TouchCoreTests/ Swift Testing suite (43 tests)
+scripts/              build-app.sh, setup-signing.sh, make-dmg.sh, install-launchagent.sh, test.sh
 legacy/               original single-file prototypes, kept for reference
 ```
 
@@ -116,7 +134,7 @@ swift build
 ## Troubleshooting
 
 - **Nothing happens on touch:** run `touchd status` or check the Permissions tab. Both Accessibility and Input Monitoring are required.
-- **After a rebuild permissions stopped working:** remove the app from both lists in System Settings and add it again, or sign with a stable identity.
+- **After a rebuild permissions stopped working:** run `./scripts/setup-signing.sh` once, rebuild, and grant permissions again (the first time only). If the app is missing from Input Monitoring, run `tccutil reset ListenEvent com.touchd.app` and relaunch.
 - **Touch lands on the wrong display or is rotated:** pick the display and rotation in Settings → General.
 - **Swipes do nothing:** see the Mission Control caveat above.
 - **Different monitor:** the VID/PID are in `Sources/TouchCore/Config.swift`. Use `touchd dump` to inspect your device.

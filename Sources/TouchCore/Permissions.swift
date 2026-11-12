@@ -31,9 +31,16 @@ public enum Permissions {
     /// prompts again, so in that case this returns false and the caller should open System Settings.
     @discardableResult
     public static func requestInputMonitoring() -> Bool {
-        guard inputMonitoringState == .notDetermined else { return false }
+        // Both calls register the app in the Input Monitoring list; a listen-only event tap does too.
+        let fresh = inputMonitoringState == .notDetermined
         _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
-        return true
+        _ = CGRequestListenEventAccess()
+        if let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly,
+                                       eventsOfInterest: CGEventMask(1 << CGEventType.keyDown.rawValue),
+                                       callback: { _, _, e, _ in Unmanaged.passUnretained(e) }, userInfo: nil) {
+            CFMachPortInvalidate(tap)
+        }
+        return fresh
     }
 
     public static let accessibilitySettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!

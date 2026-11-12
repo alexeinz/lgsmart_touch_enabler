@@ -42,6 +42,11 @@ public final class GestureEngine {
     private var lastTapPt = CGPoint.zero
     private var cancelLongPress: Cancel?
     private var scrollRemX = 0.0, scrollRemY = 0.0
+    private var twoStart = Date.distantPast
+    private var velX = 0.0, velY = 0.0            // scroll velocity, output units per second
+    private var lastScrollTime = Date.distantPast
+    private var cancelMomentum: Cancel?
+    private var momRemX = 0.0, momRemY = 0.0
 
     // Fixed geometry, relative to display width.
     private let scrollStart: CGFloat = 0.006
@@ -49,6 +54,11 @@ public final class GestureEngine {
     private let multiPinchIn: CGFloat = 0.7
     private let multiPinchOut: CGFloat = 1.4
     private let doubleTapRadius: CGFloat = 30
+    private let twoTapMaxDuration: TimeInterval = 0.3
+    private let momentumMinSpeed = 250.0          // flick speed needed to coast
+    private let momentumStopSpeed = 40.0
+    private let momentumTick: TimeInterval = 1.0 / 60
+    private let momentumFriction = 0.95           // velocity kept per tick
 
     public init(sink: EventSink,
                 config: @escaping () -> TouchConfig,
@@ -64,6 +74,7 @@ public final class GestureEngine {
     public func update(points pts: [CGPoint], displayWidth W: CGFloat) {
         let cfg = config()
         let n = pts.count
+        if n > 0 { stopMomentum() }
         if n == 0 { finish(cfg); return }
 
         let c = Self.centroid(pts)
@@ -94,7 +105,7 @@ public final class GestureEngine {
         case .two:
             if n == 2 { handleTwo(c, s, W, cfg) }
             else if n >= 3 { beginMulti(n, c, s) }
-            else { mode = .consumed }
+            else { endTwo(cfg); mode = .consumed }
 
         case .multi:
             if n == multiN { handleMulti(c, s, W, cfg) }
@@ -109,6 +120,7 @@ public final class GestureEngine {
     /// Release anything held (e.g. a drag in progress). Call when disabling or shutting down.
     public func reset() {
         endLongPress()
+        stopMomentum()
         if mode == .dragging { sink.mouse(.leftUp, at: lastPt, clicks: 1) }
         mode = .idle; fired = false; multiN = 0; edgeStart = nil
         scrollRemX = 0; scrollRemY = 0
@@ -175,7 +187,45 @@ public final class GestureEngine {
         endLongPress()
         mode = .two; twoMode = .undecided
         baseC = c; baseS = s; refS = s; lastC = c
+        twoStart = now(); lastScrollTime = twoStart; velX = 0; velY = 0
     }
+
+    /// Called when a two-finger gesture ends (a finger lifted). Handles two-finger tap and flick momentum.
+    private func endTwo(_ cfg: TouchConfig) {
+        switch twoMode {
+        case .undecided:
+            if cfg.twoFingerTapRightClick, now().timeIntervalSince(twoStart) < twoTapMaxDuration {
+                log?("two-finger tap: right-click")
+                sink.mouse(.move, at: baseC, clicks: 1)
+                sink.mouse(.rightDown, at: baseC, clicks: 1)
+                sink.mouse(.rightUp, at: baseC, clicks: 1)
+            }
+        case .scroll:
+            let speed = hypot(velX, velY)
+            if cfg.momentumScroll, now().timeIntervalSince(lastScrollTime) < 0.08, speed > momentumMinSpeed {
+                log?("momentum scroll")
+                momRemX = 0; momRemY = 0
+                scheduleMomentum()
+            }
+        case .pinch: break
+        }
+    }
+
+    private func scheduleMomentum() {
+        cancelMomentum = schedule(momentumTick) { [weak self] in self?.momentumTickFired() }
+    }
+
+    private func momentumTickFired() {
+        velX *= momentumFriction; velY *= momentumFriction
+        if hypot(velX, velY) < momentumStopSpeed { cancelMomentum = nil; return }
+        momRemX += velX * momentumTick; momRemY += velY * momentumTick
+        let ix = Int(momRemX.rounded(.towardZero)), iy = Int(momRemY.rounded(.towardZero))
+        momRemX -= Double(ix); momRemY -= Double(iy)
+        if ix != 0 || iy != 0 { sink.scroll(dx: ix, dy: iy) }
+        scheduleMomentum()
+    }
+
+    private func stopMomentum() { cancelMomentum?(); cancelMomentum = nil }
 
     private func beginMulti(_ n: Int, _ c: CGPoint, _ s: CGFloat) {
         endLongPress()
@@ -198,6 +248,8 @@ public final class GestureEngine {
             lastTapPt = startPt
         } else if mode == .dragging {
             sink.mouse(.leftUp, at: lastPt, clicks: 1)
+        } else if mode == .two {
+            endTwo(cfg)
         }
         mode = .idle; fired = false; multiN = 0; edgeStart = nil
         scrollRemX = 0; scrollRemY = 0
@@ -230,6 +282,12 @@ public final class GestureEngine {
         let k = cfg.scrollSpeed * (cfg.invertScroll ? -1 : 1)
         scrollRemX += Double(dx) * k
         scrollRemY += Double(dy) * k
+        let t = now(), dt = t.timeIntervalSince(lastScrollTime)
+        if dt > 0.002 {
+            velX = 0.5 * velX + 0.5 * Double(dx) * k / dt
+            velY = 0.5 * velY + 0.5 * Double(dy) * k / dt
+            lastScrollTime = t
+        }
         let ix = Int(scrollRemX.rounded(.towardZero)), iy = Int(scrollRemY.rounded(.towardZero))
         scrollRemX -= Double(ix); scrollRemY -= Double(iy)
         if ix != 0 || iy != 0 { sink.scroll(dx: ix, dy: iy) }

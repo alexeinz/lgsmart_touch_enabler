@@ -4,7 +4,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP="build/LG Smart Touch Enabler.app"
-IDENTITY="${CODESIGN_IDENTITY:--}"   # "-" = ad-hoc; set CODESIGN_IDENTITY to keep TCC grants across rebuilds
+# Stable identity keeps privacy grants across rebuilds. Order: $CODESIGN_IDENTITY, the local dev cert
+# (run scripts/setup-signing.sh once), else ad-hoc ("-"), which resets grants on every build.
+DEV_CERT="LG Smart Touch Enabler Dev"
+if [ -n "${CODESIGN_IDENTITY:-}" ]; then IDENTITY="$CODESIGN_IDENTITY"
+elif security find-identity -p codesigning 2>/dev/null | grep -q "$DEV_CERT"; then IDENTITY="$DEV_CERT"
+else IDENTITY="-"; echo "warning: ad-hoc signing; run scripts/setup-signing.sh once so permissions survive rebuilds" >&2; fi
 
 swift build -c release --product TouchdApp
 BIN="$(swift build -c release --show-bin-path)/TouchdApp"
