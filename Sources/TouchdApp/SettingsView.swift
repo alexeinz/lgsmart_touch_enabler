@@ -3,7 +3,7 @@ import SwiftUI
 import TouchCore
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general = "General", sensitivity = "Sensitivity", gestures = "Gestures", test = "Test"
+    case general = "General", sensitivity = "Sensitivity", gestures = "Gestures", windows = "Windows", test = "Test"
     case monitor = "Monitor", permissions = "Permissions", logs = "Logs"
     var id: String { rawValue }
     var icon: String {
@@ -11,6 +11,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general: "gearshape"
         case .sensitivity: "slider.horizontal.3"
         case .gestures: "hand.draw"
+        case .windows: "macwindow.badge.plus"
         case .test: "hand.point.up.left"
         case .monitor: "display"
         case .permissions: "lock.shield"
@@ -22,6 +23,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general: Color(red: 0.35, green: 0.45, blue: 0.95)
         case .sensitivity: .orange
         case .gestures: Color(red: 0.70, green: 0.35, blue: 0.95)
+        case .windows: Color(red: 0.95, green: 0.55, blue: 0.20)
         case .test: .green
         case .monitor: Color(red: 0.10, green: 0.65, blue: 0.95)
         case .permissions: Color(red: 1.0, green: 0.30, blue: 0.45)
@@ -51,6 +53,7 @@ struct SettingsView: View {
                 case .general: GeneralTab()
                 case .sensitivity: SensitivityTab()
                 case .gestures: GesturesTab()
+                case .windows: WindowsTab()
                 case .test: TestPadTab()
                 case .monitor: MonitorTab()
                 case .permissions: PermissionsTab()
@@ -190,6 +193,43 @@ private struct SensitivityTab: View {
                     .monospacedDigit().frame(width: 100, alignment: .trailing)
             }
         }
+    }
+}
+
+// MARK: - Windows & touch helpers
+
+private struct WindowsTab: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        Form {
+            Section("Windows") {
+                Toggle("Grab window edges and corners to resize", isOn: $model.config.windowEdgeGrab)
+                Text("Touch within the grab zone of a window edge or corner, hold briefly until the highlight appears, then drag.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Move a window with three fingers", isOn: $model.config.windowThreeFingerDrag)
+                Text("Replaces the three-finger swipe shortcuts while on.").font(.caption).foregroundStyle(.secondary)
+                Toggle("Snap and tile (drag a title bar or window to an edge or corner; double-tap a title bar to maximize)", isOn: $model.config.windowSnap)
+                LabeledContent("Grab zone: \(Int(model.config.grabZone)) pt") {
+                    Slider(value: $model.config.grabZone, in: 8...80, step: 1).frame(width: 200)
+                }
+                LabeledContent("Grab hold: \(Int(model.config.grabHoldDelay * 1000)) ms") {
+                    Slider(value: $model.config.grabHoldDelay, in: 0.1...1, step: 0.05).frame(width: 200)
+                }
+            }
+            Section("Accuracy") {
+                Toggle("Touch magnet: snap taps to a nearby small button", isOn: $model.config.touchMagnet)
+                LabeledContent("Magnet radius: \(Int(model.config.magnetRadius)) pt") {
+                    Slider(value: $model.config.magnetRadius, in: 2...40, step: 1).frame(width: 200)
+                }
+                Toggle("Ripple where each finger lands", isOn: $model.config.touchRipple)
+            }
+            Section("Text selection") {
+                Toggle("Hold, then drag to select text (hold without moving still right-clicks)", isOn: $model.config.holdToSelect)
+                Toggle("Triple-tap selects a line or paragraph", isOn: $model.config.tripleTapSelectLine)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 

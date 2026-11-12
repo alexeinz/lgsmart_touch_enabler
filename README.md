@@ -21,6 +21,7 @@ A userspace touch driver for macOS. It makes the touchscreen on the **LG 31.5" 4
 - Two-finger drag = scroll (with momentum after a flick), two-finger tap = right-click, two-finger pinch = zoom
 - 3/4/5-finger swipes and 4-finger pinch fire **configurable keyboard shortcuts**
 - Up to 10 simultaneous contacts are tracked
+- **Touch helpers** (Settings → Windows): tap magnet that snaps to small buttons, finger ripples, triple-tap selects a line, hold-then-drag selects text, snap/tile windows by dragging a title bar to an edge or corner (double-tap a title bar to maximize), optional edge/corner grab-to-resize and three-finger window drag. These use the Accessibility API and are **not yet verified on the real monitor**
 - Optional **edge swipes**: one finger from a screen edge inward fires a shortcut (off by default)
 - Settings app: shortcuts, sensitivity, display and rotation, launch at login
 - **Test** tab: live view of every contact, **Logs** tab, and a **Monitor** tab (input switch, resolution, volume)
@@ -81,6 +82,11 @@ Run only one of the app or the daemon at a time, since both would inject events.
 | 3, 4 or 5 fingers swipe up | ⌃↑ (Mission Control) |
 | 3, 4 or 5 fingers swipe down | ⌃↓ (App Exposé) |
 | 4 fingers pinch in / out | F4 / F11 (Launchpad / Show Desktop) |
+| 1 finger on a title bar, dragged to a screen edge or corner | snap to half / quarter / maximize |
+| 1 finger double-tap on a title bar | maximize / restore |
+| 1 finger triple-tap | select line (3 clicks) |
+| 1 finger hold on a window edge, then drag | resize (off by default) |
+| 3 fingers on a window, drag | move the window (off by default; replaces the 3-finger swipes) |
 | 1 finger from left / right / top / bottom edge | disabled until you bind a shortcut |
 
 Every binding can be re-recorded, chosen from presets, or disabled in **Settings → Gestures**.
@@ -117,7 +123,7 @@ touchd config reset
 Sources/TouchCore/    gesture engine, config, HID source, CG event output (library, unit-tested)
 Sources/touchd/       CLI daemon
 Sources/TouchdApp/    SwiftUI menu-bar settings app
-Tests/TouchCoreTests/ Swift Testing suite (43 tests)
+Tests/TouchCoreTests/ Swift Testing suite (61 tests)
 scripts/              build-app.sh, setup-signing.sh, make-dmg.sh, install-launchagent.sh, test.sh
 legacy/               original single-file prototypes, kept for reference
 ```

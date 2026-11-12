@@ -16,7 +16,7 @@ public final class GestureEngine {
     public typealias Cancel = () -> Void
     public typealias Scheduler = (_ delay: TimeInterval, _ block: @escaping () -> Void) -> Cancel
 
-    private enum Mode { case idle, pending, dragging, two, multi, consumed }
+    private enum Mode { case idle, pending, held, grab, dragging, two, multi, consumed }
     private enum TwoMode { case undecided, scroll, pinch }
 
     private let sink: EventSink
@@ -26,6 +26,8 @@ public final class GestureEngine {
     public var log: ((String) -> Void)?
     /// Display rectangle in the same coordinate space as the points. `.zero` disables edge swipes.
     public var displayBounds = CGRect.zero
+    /// Window/accessibility operations for the touch helpers. nil disables them all.
+    public var windows: WindowService?
 
     private var mode = Mode.idle
     private var twoMode = TwoMode.undecided
@@ -47,6 +49,14 @@ public final class GestureEngine {
     private var lastScrollTime = Date.distantPast
     private var cancelMomentum: Cancel?
     private var momRemX = 0.0, momRemY = 0.0
+    private var tapCount = 0
+    private var grabCandidate: (win: WindowInfo, edges: GrabEdges)?
+    private var grab: (win: WindowInfo, edges: GrabEdges)?
+    private var cancelGrab: Cancel?
+    private var titleWin: WindowInfo?             // window whose title bar the current one-finger drag started on
+    private var dragWin: WindowInfo?              // window being moved by three fingers
+    private var winDragC = CGPoint.zero
+    private var restoreFrames: [Int: CGRect] = [:]
 
     // Fixed geometry, relative to display width.
     private let scrollStart: CGFloat = 0.006
@@ -84,7 +94,7 @@ public final class GestureEngine {
         case .idle:
             if n == 1 { beginPending(pts[0], cfg) }
             else if n == 2 { beginTwo(c, s) }
-            else { beginMulti(n, c, s) }
+            else { beginMulti(n, c, s, cfg) }
 
         case .pending:
             if n == 1 {
@@ -95,22 +105,50 @@ public final class GestureEngine {
                     sink.mouse(.leftDrag, at: pts[0], clicks: 1)
                     lastPt = pts[0]
                     mode = .dragging
+                    if cfg.windowSnap, let w = windows, let info = w.window(at: startPt), info.titleBar.contains(startPt) {
+                        titleWin = info
+                    }
                 }
             } else if n == 2 { beginTwo(c, s) }
-            else { beginMulti(n, c, s) }
+            else { beginMulti(n, c, s, cfg) }
+
+        case .held:
+            if n == 1 {
+                if Self.dist(pts[0], startPt) > CGFloat(cfg.moveThreshold) {
+                    log?("hold-drag select")
+                    sink.mouse(.leftDown, at: startPt, clicks: 2)
+                    sink.mouse(.leftDrag, at: pts[0], clicks: 2)
+                    lastPt = pts[0]
+                    mode = .dragging
+                }
+            } else if n == 2 { beginTwo(c, s) }
+            else { beginMulti(n, c, s, cfg) }
+
+        case .grab:
+            if n == 1, let g = grab {
+                let r = g.edges.resize(g.win.frame, dx: pts[0].x - startPt.x, dy: pts[0].y - startPt.y)
+                windows?.setFrame(g.win.id, r)
+                windows?.showHandle(r)
+            } else { endGrab(); mode = .consumed }
 
         case .dragging:
-            if n == 1 { sink.mouse(.leftDrag, at: pts[0], clicks: 1); lastPt = pts[0] }
+            if n == 1 {
+                let clicks = 1
+                sink.mouse(.leftDrag, at: pts[0], clicks: clicks); lastPt = pts[0]
+                if titleWin != nil, let w = windows {
+                    w.showPreview(Snap.rect(for: pts[0], in: w.usableBounds(containing: pts[0])))
+                }
+            }
 
         case .two:
             if n == 2 { handleTwo(c, s, W, cfg) }
-            else if n >= 3 { beginMulti(n, c, s) }
+            else if n >= 3 { beginMulti(n, c, s, cfg) }
             else { endTwo(cfg); mode = .consumed }
 
         case .multi:
             if n == multiN { handleMulti(c, s, W, cfg) }
-            else if n >= 3 { multiN = n; baseC = c; baseS = s }   // finger count changed: re-baseline
-            else { mode = .consumed }
+            else if n >= 3 { multiN = n; baseC = c; baseS = s; if n != 3 { endWinDrag() } }   // finger count changed: re-baseline
+            else { endWinDrag(); mode = .consumed }
 
         case .consumed:
             break
@@ -122,6 +160,8 @@ public final class GestureEngine {
         endLongPress()
         stopMomentum()
         if mode == .dragging { sink.mouse(.leftUp, at: lastPt, clicks: 1) }
+        endGrab(); titleWin = nil; windows?.showPreview(nil)
+        dragWin = nil
         mode = .idle; fired = false; multiN = 0; edgeStart = nil
         scrollRemX = 0; scrollRemY = 0
     }
@@ -132,13 +172,43 @@ public final class GestureEngine {
         startPt = p; lastPt = p
         mode = .pending
         edgeStart = edgeZone(p, cfg)
+        grabCandidate = nil; titleWin = nil
+        if cfg.windowEdgeGrab, let w = windows, let info = w.window(at: p) {
+            let e = GrabEdges.at(p, in: info.frame, zone: CGFloat(cfg.grabZone))
+            if !e.isEmpty {
+                grabCandidate = (info, e)
+                cancelGrab = schedule(cfg.grabHoldDelay) { [weak self] in self?.grabFired() }
+            }
+        }
         if cfg.rightClickOnHold {
             cancelLongPress = schedule(cfg.longPressDelay) { [weak self] in self?.longPressFired() }
         }
     }
 
+    private func grabFired() {
+        guard mode == .pending, let g = grabCandidate else { return }
+        endLongPress()
+        log?("window edge grab")
+        grab = g; mode = .grab; edgeStart = nil
+        windows?.showHandle(g.win.frame)
+    }
+
+    private func endGrab() {
+        if grab != nil { windows?.showHandle(nil) }
+        grab = nil; grabCandidate = nil
+    }
+
+    private func endWinDrag() {
+        guard let w = dragWin else { return }
+        dragWin = nil
+        windows?.showPreview(nil)
+        if config().windowSnap, let svc = windows,
+           let r = Snap.rect(for: winDragC, in: svc.usableBounds(containing: winDragC)) { svc.setFrame(w.id, r); log?("snap window") }
+    }
+
     private func longPressFired() {
         guard mode == .pending else { return }
+        if config().holdToSelect { log?("hold"); mode = .held; return }
         log?("right-click")
         sink.mouse(.rightDown, at: startPt, clicks: 1)
         sink.mouse(.rightUp, at: startPt, clicks: 1)
@@ -181,7 +251,7 @@ public final class GestureEngine {
         return d <= CGFloat(cfg.moveThreshold) || inward >= 0.7 * d
     }
 
-    private func endLongPress() { cancelLongPress?(); cancelLongPress = nil }
+    private func endLongPress() { cancelLongPress?(); cancelLongPress = nil; cancelGrab?(); cancelGrab = nil }
 
     private func beginTwo(_ c: CGPoint, _ s: CGFloat) {
         endLongPress()
@@ -227,32 +297,71 @@ public final class GestureEngine {
 
     private func stopMomentum() { cancelMomentum?(); cancelMomentum = nil }
 
-    private func beginMulti(_ n: Int, _ c: CGPoint, _ s: CGFloat) {
+    private func beginMulti(_ n: Int, _ c: CGPoint, _ s: CGFloat, _ cfg: TouchConfig) {
         endLongPress()
-        if mode != .multi { fired = false }
+        let first = mode != .multi
+        if first { fired = false }
         mode = .multi
         multiN = n; baseC = c; baseS = s
+        if first, n == 3, cfg.windowThreeFingerDrag, let w = windows, let info = w.window(at: c) {
+            dragWin = info; winDragC = c
+            log?("window drag")
+        }
     }
 
     private func finish(_ cfg: TouchConfig) {
         endLongPress()
         if mode == .pending {
+            let maxClicks = cfg.tripleTapSelectLine ? 3 : 2
             var clicks = 1
             if now().timeIntervalSince(lastTapTime) < cfg.doubleTapWindow,
-               Self.dist(lastTapPt, startPt) < doubleTapRadius { clicks = 2 }
-            log?("tap x\(clicks)")
-            sink.mouse(.move, at: startPt, clicks: 1)
-            sink.mouse(.leftDown, at: startPt, clicks: clicks)
-            sink.mouse(.leftUp, at: startPt, clicks: clicks)
-            lastTapTime = clicks == 2 ? .distantPast : now()
+               Self.dist(lastTapPt, startPt) < doubleTapRadius { clicks = min(tapCount + 1, maxClicks) }
+            tapCount = clicks
+            lastTapTime = clicks >= maxClicks ? .distantPast : now()
             lastTapPt = startPt
+            if clicks == 2, cfg.windowSnap, let w = windows, let info = w.window(at: startPt), info.titleBar.contains(startPt) {
+                log?("title-bar double-tap: maximize")
+                toggleMaximize(info, w)
+                lastTapTime = .distantPast
+            } else {
+                var p = startPt
+                if cfg.touchMagnet, let w = windows, let m = w.magnet(near: startPt, radius: CGFloat(cfg.magnetRadius)) {
+                    p = m
+                    if m != startPt { log?("magnet") }
+                }
+                log?("tap x\(clicks)")
+                sink.mouse(.move, at: p, clicks: 1)
+                sink.mouse(.leftDown, at: p, clicks: clicks)
+                sink.mouse(.leftUp, at: p, clicks: clicks)
+            }
+        } else if mode == .held {
+            log?("right-click")
+            sink.mouse(.move, at: startPt, clicks: 1)
+            sink.mouse(.rightDown, at: startPt, clicks: 1)
+            sink.mouse(.rightUp, at: startPt, clicks: 1)
+        } else if mode == .grab {
+            endGrab()
         } else if mode == .dragging {
             sink.mouse(.leftUp, at: lastPt, clicks: 1)
+            if let t = titleWin, let w = windows {
+                w.showPreview(nil)
+                if let r = Snap.rect(for: lastPt, in: w.usableBounds(containing: lastPt)) { w.setFrame(t.id, r); log?("snap window") }
+            }
         } else if mode == .two {
             endTwo(cfg)
+        } else if mode == .multi {
+            endWinDrag()
         }
+        titleWin = nil
         mode = .idle; fired = false; multiN = 0; edgeStart = nil
         scrollRemX = 0; scrollRemY = 0
+    }
+
+    private func toggleMaximize(_ info: WindowInfo, _ w: WindowService) {
+        let usable = w.usableBounds(containing: info.frame.origin)
+        let isMax = abs(info.frame.width - usable.width) < 4 && abs(info.frame.height - usable.height) < 4
+        if isMax, let saved = restoreFrames.removeValue(forKey: info.id) { w.setFrame(info.id, saved) }
+        else if !isMax { restoreFrames[info.id] = info.frame; w.setFrame(info.id, usable) }
     }
 
     // MARK: - Two fingers: scroll or pinch
@@ -296,6 +405,12 @@ public final class GestureEngine {
     // MARK: - Three or more fingers: swipe / pinch
 
     private func handleMulti(_ c: CGPoint, _ s: CGFloat, _ W: CGFloat, _ cfg: TouchConfig) {
+        if let w = dragWin, cfg.windowThreeFingerDrag, multiN == 3 {
+            winDragC = c
+            windows?.setFrame(w.id, w.frame.offsetBy(dx: c.x - baseC.x, dy: c.y - baseC.y))
+            if cfg.windowSnap, let svc = windows { svc.showPreview(Snap.rect(for: c, in: svc.usableBounds(containing: c))) }
+            return
+        }
         guard cfg.gesturesEnabled, !fired, (3...5).contains(multiN) else { return }
         let dx = c.x - baseC.x, dy = c.y - baseC.y
         if max(abs(dx), abs(dy)) > CGFloat(cfg.swipeDistance) * W {

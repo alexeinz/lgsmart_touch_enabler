@@ -82,6 +82,18 @@ public struct TouchConfig: Codable, Equatable, Sendable {
     public var zoomStep = 1.15                 // finger-spread ratio per zoom keypress
     public var edgeWidth = 0.015               // edge-swipe start zone, fraction of display width
 
+    // Touch helpers
+    public var windowEdgeGrab = false          // hold at a window edge/corner, then drag to resize
+    public var windowThreeFingerDrag = false   // three fingers on a window move it (replaces 3-finger swipes there)
+    public var windowSnap = true               // drag a window to a screen edge/corner to tile it; double-tap title bar maximizes
+    public var touchMagnet = true              // taps near a small control snap to it
+    public var touchRipple = true              // brief circle at each new contact
+    public var holdToSelect = false            // hold, then drag selects by word; right-click moves to release
+    public var tripleTapSelectLine = true      // third quick tap sends a triple-click
+    public var grabZone = 24.0                 // points around a window edge that can be grabbed
+    public var grabHoldDelay = 0.25            // seconds to hold before the edge grab engages
+    public var magnetRadius = 12.0             // points
+
     // Device (advanced; edit the JSON file)
     public var vendorID = 0x284B
     public var productID = 0x8300
@@ -110,6 +122,7 @@ public struct TouchConfig: Codable, Equatable, Sendable {
         moveThreshold = d.moveThreshold; rightClickOnHold = d.rightClickOnHold
         longPressDelay = d.longPressDelay; doubleTapWindow = d.doubleTapWindow
         swipeDistance = d.swipeDistance; zoomStep = d.zoomStep; edgeWidth = d.edgeWidth
+        grabZone = d.grabZone; grabHoldDelay = d.grabHoldDelay; magnetRadius = d.magnetRadius
     }
 
     /// Returns a copy with every value forced into a sane range (hand-edited files, old versions).
@@ -123,6 +136,9 @@ public struct TouchConfig: Codable, Equatable, Sendable {
         c.swipeDistance = min(max(c.swipeDistance, 0.01), 0.5)
         c.zoomStep = min(max(c.zoomStep, 1.02), 2)
         c.edgeWidth = min(max(c.edgeWidth, 0.003), 0.1)
+        c.grabZone = min(max(c.grabZone, 8), 80)
+        c.grabHoldDelay = min(max(c.grabHoldDelay, 0.1), 1)
+        c.magnetRadius = min(max(c.magnetRadius, 2), 40)
         return c
     }
 
@@ -145,6 +161,16 @@ public struct TouchConfig: Codable, Equatable, Sendable {
         swipeDistance = try c.decodeIfPresent(Double.self, forKey: .swipeDistance) ?? d.swipeDistance
         zoomStep = try c.decodeIfPresent(Double.self, forKey: .zoomStep) ?? d.zoomStep
         edgeWidth = try c.decodeIfPresent(Double.self, forKey: .edgeWidth) ?? d.edgeWidth
+        windowEdgeGrab = try c.decodeIfPresent(Bool.self, forKey: .windowEdgeGrab) ?? d.windowEdgeGrab
+        windowThreeFingerDrag = try c.decodeIfPresent(Bool.self, forKey: .windowThreeFingerDrag) ?? d.windowThreeFingerDrag
+        windowSnap = try c.decodeIfPresent(Bool.self, forKey: .windowSnap) ?? d.windowSnap
+        touchMagnet = try c.decodeIfPresent(Bool.self, forKey: .touchMagnet) ?? d.touchMagnet
+        touchRipple = try c.decodeIfPresent(Bool.self, forKey: .touchRipple) ?? d.touchRipple
+        holdToSelect = try c.decodeIfPresent(Bool.self, forKey: .holdToSelect) ?? d.holdToSelect
+        tripleTapSelectLine = try c.decodeIfPresent(Bool.self, forKey: .tripleTapSelectLine) ?? d.tripleTapSelectLine
+        grabZone = try c.decodeIfPresent(Double.self, forKey: .grabZone) ?? d.grabZone
+        grabHoldDelay = try c.decodeIfPresent(Double.self, forKey: .grabHoldDelay) ?? d.grabHoldDelay
+        magnetRadius = try c.decodeIfPresent(Double.self, forKey: .magnetRadius) ?? d.magnetRadius
         vendorID = try c.decodeIfPresent(Int.self, forKey: .vendorID) ?? d.vendorID
         productID = try c.decodeIfPresent(Int.self, forKey: .productID) ?? d.productID
         bindings = try c.decodeIfPresent([String: Shortcut].self, forKey: .bindings) ?? [:]

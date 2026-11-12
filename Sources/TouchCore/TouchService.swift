@@ -20,6 +20,9 @@ public final class TouchService {
     public var onStatus: ((ServiceStatus) -> Void)?
     /// Raw contacts, normalized 0...1 in the digitizer's own orientation (for the Touch Test pad).
     public var onTouches: (([CGPoint]) -> Void)?
+    /// Contacts mapped to global screen points (top-left origin), for the ripple overlay.
+    public var onScreenPoints: (([CGPoint]) -> Void)?
+    public var windows: WindowService? { didSet { engine.windows = windows } }
     public var log: ((String) -> Void)? { didSet { engine.log = log } }
     private let logs = LogStore.shared
     private var lastStartFailed = false
@@ -121,6 +124,7 @@ public final class TouchService {
         wasTouching = touching
         let pts = normalized.map { Displays.map($0, rotation: config.rotation, bounds: bounds) }
         engine.displayBounds = bounds
+        onScreenPoints?(pts)
         engine.update(points: pts, displayWidth: bounds.width)
     }
 }

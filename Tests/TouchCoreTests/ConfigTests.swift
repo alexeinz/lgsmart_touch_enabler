@@ -24,6 +24,15 @@ import Testing
         #expect(!c.momentumScroll && c.twoFingerTapRightClick)
     }
 
+    @Test func helperTogglesDefaultsAndDecode() throws {
+        let d = try Fixture.decode("{}")
+        #expect(!d.windowEdgeGrab && !d.windowThreeFingerDrag && !d.holdToSelect)
+        #expect(d.windowSnap && d.touchMagnet && d.touchRipple && d.tripleTapSelectLine)
+        let c = try Fixture.decode(#"{"windowEdgeGrab": true, "grabZone": 999}"#)
+        #expect(c.windowEdgeGrab)
+        #expect(c.sanitized().grabZone == 80)
+    }
+
     @Test func storeSaveLoad() {
         let store = ConfigStore(url: Fixture.tempURL())
         #expect(!store.exists)

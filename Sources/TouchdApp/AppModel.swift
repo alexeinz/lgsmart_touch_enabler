@@ -19,6 +19,8 @@ final class AppModel: ObservableObject {
     let store = ConfigStore()
     private let service: TouchService
     private var timer: Timer?
+    private let overlay = OverlayController()
+    private let ax = AXWindowService()
 
     init() {
         let cfg = store.load()
@@ -29,6 +31,13 @@ final class AppModel: ObservableObject {
         }
 
         service.onTouches = { [weak self] pts in self?.touches = pts }
+        ax.onHandle = { [weak self] r in self?.overlay.setHandle(r) }
+        ax.onPreview = { [weak self] r in self?.overlay.setPreview(r) }
+        service.windows = ax
+        service.onScreenPoints = { [weak self] pts in
+            guard let self, self.config.touchRipple else { return }
+            self.overlay.contacts(pts)
+        }
         LogStore.shared.onAppend = { [weak self] entry in
             DispatchQueue.main.async {
                 guard let self else { return }
