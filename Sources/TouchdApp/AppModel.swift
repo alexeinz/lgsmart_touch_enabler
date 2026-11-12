@@ -13,6 +13,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var launchAtLogin = false
     @Published private(set) var loginItemError: String?
     @Published private(set) var displays: [DisplayInfo] = []
+    @Published private(set) var logs: [LogStore.Entry] = LogStore.shared.snapshot
 
     let store = ConfigStore()
     private let service: TouchService
@@ -26,8 +27,18 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async { self?.status = s }
         }
 
+        LogStore.shared.onAppend = { [weak self] entry in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.logs.append(entry)
+                if self.logs.count > 1000 { self.logs.removeFirst(self.logs.count - 1000) }
+            }
+        }
+        service.log = { LogStore.shared.log($0, .gesture) }
+        LogStore.shared.log("LG Smart Touch Enabler started")
+
         if !Permissions.accessibilityGranted { Permissions.requestAccessibility() }
-        if !Permissions.inputMonitoringGranted { Permissions.requestInputMonitoring() }
+        Permissions.requestInputMonitoring()
         service.start()
         refresh()
 
@@ -51,16 +62,29 @@ final class AppModel: ObservableObject {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
             loginItemError = nil
         } catch {
-            loginItemError = "Couldn't change login item: \(error.localizedDescription). Run the bundled Touchd.app from /Applications."
+            loginItemError = "Couldn't change login item: \(error.localizedDescription). Run the bundled app from /Applications."
         }
         launchAtLogin = SMAppService.mainApp.status == .enabled
+    }
+
+    func clearLogs() { LogStore.shared.clear(); logs = [] }
+
+    /// Starts a fresh copy of the app and quits this one. Input Monitoring grants usually only
+    /// take effect for a process that starts after the grant.
+    func relaunch() {
+        LogStore.shared.log("Relaunching")
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        task.arguments = ["-n", Bundle.main.bundlePath]
+        try? task.run()
+        NSApp.terminate(nil)
     }
 
     func resetShortcuts() { config.resetBindings() }
     func resetSensitivity() { config.resetSensitivity() }
 
     private func persist() {
-        store.save(config)
+        if !store.save(config) { LogStore.shared.log("Could not save config", .error) }
         service.update(config: config)
         status = service.status
     }

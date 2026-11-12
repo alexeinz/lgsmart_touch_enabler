@@ -19,6 +19,8 @@ public final class TouchService {
     public private(set) var status = ServiceStatus()
     public var onStatus: ((ServiceStatus) -> Void)?
     public var log: ((String) -> Void)? { didSet { engine.log = log } }
+    private let logs = LogStore.shared
+    private var lastStartFailed = false
 
     private let source = HIDTouchSource()
     private let engine: GestureEngine
@@ -50,6 +52,13 @@ public final class TouchService {
         guard config.enabled else { refreshStatus(); return false }
         refreshDisplay()
         let ok = source.start(vendorID: config.vendorID, productID: config.productID)
+        if ok {
+            if lastStartFailed || !status.running { logs.log("Reading touchscreen (VID 0x\(String(config.vendorID, radix: 16, uppercase: true)) PID 0x\(String(config.productID, radix: 16, uppercase: true)))") }
+            lastStartFailed = false
+        } else if !lastStartFailed {
+            lastStartFailed = true
+            logs.log("Could not open the HID device; Input Monitoring is \(Permissions.inputMonitoringState.rawValue)", .warn)
+        }
         refreshStatus()
         return ok
     }
@@ -81,7 +90,19 @@ public final class TouchService {
         s.accessibility = Permissions.accessibilityGranted
         s.inputMonitoring = Permissions.inputMonitoringGranted
         s.displayName = Displays.all().first(where: { $0.id == Displays.target(preferred: config.displayID) })?.name ?? ""
-        if s != status { status = s; onStatus?(s) }
+        if s != status {
+            logStatusChanges(from: status, to: s)
+            status = s
+            onStatus?(s)
+        }
+    }
+
+    private func logStatusChanges(from o: ServiceStatus, to n: ServiceStatus) {
+        if o.accessibility != n.accessibility { logs.log("Accessibility \(n.accessibility ? "granted" : "missing")", n.accessibility ? .info : .warn) }
+        if o.inputMonitoring != n.inputMonitoring { logs.log("Input Monitoring \(n.inputMonitoring ? "granted" : "missing")", n.inputMonitoring ? .info : .warn) }
+        if o.deviceConnected != n.deviceConnected { logs.log(n.deviceConnected ? "Touchscreen connected" : "Touchscreen disconnected", n.deviceConnected ? .info : .warn) }
+        if o.running != n.running && !n.running { logs.log("Touch input stopped", .info) }
+        if o.displayName != n.displayName && !n.displayName.isEmpty { logs.log("Target display: \(n.displayName)") }
     }
 
     public func refreshDisplay() {

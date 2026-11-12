@@ -4,6 +4,10 @@ import IOKit.hid
 
 /// macOS privacy permissions touchd needs.
 public enum Permissions {
+    public enum AccessState: String, Sendable {
+        case granted, denied, notDetermined
+    }
+
     /// Needed to post mouse/keyboard events.
     public static var accessibilityGranted: Bool { AXIsProcessTrusted() }
 
@@ -13,12 +17,23 @@ public enum Permissions {
     }
 
     /// Needed to read the touchscreen's HID reports.
-    public static var inputMonitoringGranted: Bool {
-        IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
+    public static var inputMonitoringState: AccessState {
+        switch IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) {
+        case kIOHIDAccessTypeGranted: return .granted
+        case kIOHIDAccessTypeDenied: return .denied
+        default: return .notDetermined
+        }
     }
 
-    public static func requestInputMonitoring() {
+    public static var inputMonitoringGranted: Bool { inputMonitoringState == .granted }
+
+    /// Shows the system prompt the first time. Once the user has answered (or dismissed) it, macOS never
+    /// prompts again, so in that case this returns false and the caller should open System Settings.
+    @discardableResult
+    public static func requestInputMonitoring() -> Bool {
+        guard inputMonitoringState == .notDetermined else { return false }
         _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+        return true
     }
 
     public static let accessibilitySettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!

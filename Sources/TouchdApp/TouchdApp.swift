@@ -7,11 +7,11 @@ struct TouchdApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
-        MenuBarExtra("Touchd", systemImage: model.status.isHealthy ? "hand.tap.fill" : "hand.tap") {
+        MenuBarExtra("LG Smart Touch Enabler", systemImage: model.status.isHealthy ? "hand.tap.fill" : "hand.tap") {
             MenuContent().environmentObject(model)
         }
 
-        Window("Touchd Settings", id: "settings") {
+        Window("LG Smart Touch Enabler", id: "settings") {
             SettingsView().environmentObject(model)
         }
         .windowResizability(.contentSize)
@@ -33,7 +33,7 @@ private struct MenuContent: View {
             NSApp.activate(ignoringOtherApps: true)
         }
         .keyboardShortcut(",")
-        Button("Quit Touchd") { NSApp.terminate(nil) }
+        Button("Quit LG Smart Touch Enabler") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
 

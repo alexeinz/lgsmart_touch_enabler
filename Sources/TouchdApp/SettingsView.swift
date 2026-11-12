@@ -10,7 +10,9 @@ struct SettingsView: View {
             GeneralTab().tabItem { Label("General", systemImage: "gearshape") }
             SensitivityTab().tabItem { Label("Sensitivity", systemImage: "slider.horizontal.3") }
             GesturesTab().tabItem { Label("Gestures", systemImage: "hand.draw") }
+            MonitorTab().tabItem { Label("Monitor", systemImage: "display") }
             PermissionsTab().tabItem { Label("Permissions", systemImage: "lock.shield") }
+            LogsTab().tabItem { Label("Logs", systemImage: "list.bullet.rectangle") }
         }
         .frame(width: 560, height: 500)
         .padding()
@@ -134,13 +136,31 @@ private struct PermissionsTab: View {
         Form {
             Section {
                 permission("Accessibility", granted: model.status.accessibility,
-                           why: "Lets Touchd post clicks, scrolls and shortcuts.",
-                           request: Permissions.requestAccessibility,
+                           why: "Lets LG Smart Touch Enabler post clicks, scrolls and shortcuts.",
+                           request: { Permissions.requestAccessibility() },
                            url: Permissions.accessibilitySettingsURL)
                 permission("Input Monitoring", granted: model.status.inputMonitoring,
-                           why: "Lets Touchd read the touchscreen's raw touch data.",
-                           request: Permissions.requestInputMonitoring,
+                           why: "Lets LG Smart Touch Enabler read the touchscreen's raw touch data.",
+                           request: {
+                               // macOS only prompts once; after that the user must flip the switch in Settings.
+                               NSApp.activate(ignoringOtherApps: true)
+                               if !Permissions.requestInputMonitoring() {
+                                   NSWorkspace.shared.open(Permissions.inputMonitoringSettingsURL)
+                               }
+                           },
                            url: Permissions.inputMonitoringSettingsURL)
+                if model.status.inputMonitoring && !model.status.running && model.config.enabled {
+                    HStack {
+                        Text("Input Monitoring is granted but touch input hasn't started. Relaunch to apply.")
+                            .font(.caption)
+                        Spacer()
+                        Button("Relaunch") { model.relaunch() }
+                    }
+                }
+                if !model.status.inputMonitoring {
+                    Text("Add LG Smart Touch Enabler under Privacy & Security → Input Monitoring and switch it on, then relaunch. If it is listed but still missing after a rebuild, remove it with “−” and add it again.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             Section("About") {
                 LabeledContent("Config file") {
@@ -182,5 +202,130 @@ private struct StatusRow: View {
             Label(ok ? okText : badText, systemImage: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                 .foregroundStyle(ok ? Color.green : Color.orange)
         }
+    }
+}
+
+
+// MARK: - Logs
+
+private struct LogsTab: View {
+    @EnvironmentObject var model: AppModel
+    @State private var showGestures = true
+    @State private var autoScroll = true
+
+    private var visible: [LogStore.Entry] {
+        showGestures ? model.logs : model.logs.filter { $0.level != .gesture }
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ScrollViewReader { proxy in
+                List(visible) { e in
+                    Text(e.line)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(color(e.level))
+                        .textSelection(.enabled)
+                        .id(e.id)
+                }
+                .onChange(of: model.logs.count) { _ in
+                    if autoScroll, let last = visible.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
+            }
+            HStack {
+                Toggle("Gestures", isOn: $showGestures)
+                Toggle("Auto-scroll", isOn: $autoScroll)
+                Spacer()
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(model.logs.map(\.line).joined(separator: "\n"), forType: .string)
+                }
+                Button("Reveal file") {
+                    if let u = LogStore.shared.fileURL { NSWorkspace.shared.activateFileViewerSelecting([u]) }
+                }
+                Button("Clear") { model.clearLogs() }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func color(_ l: LogStore.Level) -> Color {
+        switch l {
+        case .error: return .red
+        case .warn: return .orange
+        case .gesture: return .blue
+        case .info: return .primary
+        }
+    }
+}
+
+// MARK: - Monitor
+
+private struct MonitorTab: View {
+    @EnvironmentObject var model: AppModel
+    @State private var modes: [ResolutionMode] = []
+    @State private var current: String = ""
+    @State private var volume: Double = 0.5
+    @State private var muted = false
+    @State private var hasSoftwareVolume = false
+    @State private var input: DDC.Input = DDC.Input.all[0]
+    @State private var ddcVolume: Double = 50
+    @State private var message = ""
+
+    private var display: CGDirectDisplayID { Displays.target(preferred: model.config.displayID) }
+
+    var body: some View {
+        Form {
+            Section("Resolution") {
+                Picker("Mode", selection: $current) {
+                    ForEach(modes) { Text($0.title).tag($0.id) }
+                }
+                .onChange(of: current) { new in
+                    guard let m = modes.first(where: { $0.id == new }), m != Resolution.current(for: display) else { return }
+                    let ok = Resolution.set(m, on: display)
+                    LogStore.shared.log("Resolution \(m.title): \(ok ? "ok" : "failed")", ok ? .info : .error)
+                    message = ok ? "" : "Could not change resolution."
+                }
+            }
+            Section("Sound") {
+                if hasSoftwareVolume {
+                    Slider(value: $volume, in: 0...1) { Text("Volume (\(Sound.deviceName ?? "output"))") }
+                        .onChange(of: volume) { v in Sound.setVolume(Float(v)) }
+                    Toggle("Mute", isOn: $muted).onChange(of: muted) { m in Sound.setMuted(m) }
+                } else {
+                    Text("The current output (\(Sound.deviceName ?? "unknown")) has no software volume. Use the monitor volume below.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if DDC.isSupported {
+                    Slider(value: $ddcVolume, in: 0...100, step: 1) { Text("Monitor volume") }
+                        .onChange(of: ddcVolume) { v in DDC.set(.volume, UInt16(v)) }
+                }
+            }
+            Section("Input source (DDC/CI)") {
+                if DDC.isSupported {
+                    Picker("Input", selection: $input) {
+                        ForEach(DDC.Input.all) { Text($0.name).tag($0) }
+                    }
+                    Button("Switch input") {
+                        let ok = DDC.set(.input, input.code)
+                        LogStore.shared.log("Switch input to \(input.name): \(ok ? "sent" : "failed")", ok ? .info : .error)
+                        message = ok ? "Sent. The monitor may blank while it switches." : "DDC write failed."
+                    }
+                    Text("Switching away from this Mac's input will make the screen go dark. Press the monitor's own input button to come back.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("No DDC-capable external display found (Apple silicon Mac and an external monitor are required).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.secondary) }
+        }
+        .formStyle(.grouped)
+        .onAppear(perform: reload)
+    }
+
+    private func reload() {
+        modes = Resolution.modes(for: display)
+        current = Resolution.current(for: display)?.id ?? ""
+        if let v = Sound.volume { hasSoftwareVolume = true; volume = Double(v); muted = Sound.muted ?? false } else { hasSoftwareVolume = false }
     }
 }

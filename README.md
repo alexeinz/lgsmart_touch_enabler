@@ -1,4 +1,4 @@
-# touchd
+# LG Smart Touch Enabler (touchd)
 
 A userspace touch driver for macOS. It makes the touchscreen on the **LG 31.5" 4K Smart Monitor Swing** (MFTouch HID digitizer, `VID 0x284B / PID 0x8300`) work as a real touch input, which macOS does not support natively. It ships a menu-bar settings app and a headless daemon.
 
@@ -22,8 +22,8 @@ A userspace touch driver for macOS. It makes the touchscreen on the **LG 31.5" 4
 
 ```bash
 ./scripts/build-app.sh
-cp -R build/Touchd.app /Applications/
-open /Applications/Touchd.app
+cp -R "build/LG Smart Touch Enabler.app" /Applications/
+open "/Applications/LG Smart Touch Enabler.app"
 ```
 
 Open **Settings…** from the menu-bar icon, then:
