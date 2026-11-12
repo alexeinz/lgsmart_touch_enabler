@@ -137,7 +137,7 @@ swift build
 - **After a rebuild permissions stopped working:** run `./scripts/setup-signing.sh` once, rebuild, and grant permissions again (the first time only). If the app is missing from Input Monitoring, run `tccutil reset ListenEvent com.touchd.app` and relaunch.
 - **Touch lands on the wrong display or is rotated:** pick the display and rotation in Settings → General.
 - **Swipes do nothing:** see the Mission Control caveat above.
-- **Different monitor:** the VID/PID are in `Sources/TouchCore/Config.swift`. Use `touchd dump` to inspect your device.
+- **Different monitor:** see [Adding another touch screen](docs/ADDING_SCREENS.md) (find the VID/PID, verify with `touchd dump`, map display and rotation).
 
 ## License
 
