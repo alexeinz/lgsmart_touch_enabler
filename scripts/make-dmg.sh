@@ -5,10 +5,11 @@ cd "$(dirname "$0")/.."
 
 NAME="LG Smart Touch Enabler"
 APP="build/$NAME.app"
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist" 2>/dev/null || echo 2.0.0)"
-DMG="build/LG-Smart-Touch-Enabler-$VERSION.dmg"
 
 [ -d "$APP" ] || ./scripts/build-app.sh
+# The DMG is named after the version stamped into the app by build-app.sh.
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+DMG="build/LG-Smart-Touch-Enabler-$VERSION.dmg"
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT

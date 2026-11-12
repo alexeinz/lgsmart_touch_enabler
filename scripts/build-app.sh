@@ -11,6 +11,14 @@ if [ -n "${CODESIGN_IDENTITY:-}" ]; then IDENTITY="$CODESIGN_IDENTITY"
 elif security find-identity -p codesigning 2>/dev/null | grep -q "$DEV_CERT"; then IDENTITY="$DEV_CERT"
 else IDENTITY="-"; echo "warning: ad-hoc signing; run scripts/setup-signing.sh once so permissions survive rebuilds" >&2; fi
 
+# Version: $VERSION (the release workflow passes the tag), else the latest git tag, else 0.0.0.
+VERSION="${VERSION:-$(git describe --tags --abbrev=0 2>/dev/null || echo 0.0.0)}"
+VERSION="${VERSION#v}"
+if ! [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+  echo "error: version '$VERSION' is not numeric (expected e.g. 2.1.0 or v2.1.0)" >&2; exit 1
+fi
+BUILD="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+
 swift build -c release --product TouchdApp
 BIN="$(swift build -c release --show-bin-path)/TouchdApp"
 
@@ -31,7 +39,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>NSInputMonitoringUsageDescription</key><string>Reads touch reports from the LG touchscreen.</string>
   <key>CFBundleExecutable</key><string>LG Smart Touch Enabler</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>2.0.0</string>
+  <key>CFBundleShortVersionString</key><string>0.0.0</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
@@ -39,7 +47,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+# Stamp the version before signing (the heredoc is quoted, so it holds placeholders).
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" -c "Set :CFBundleVersion $BUILD" "$APP/Contents/Info.plist"
 
 codesign --force --deep --sign "$IDENTITY" "$APP"
-echo "Built $APP"
+echo "Built $APP ($VERSION, build $BUILD)"
 echo "Install:  cp -R $APP /Applications/   then open it and grant Accessibility + Input Monitoring."
