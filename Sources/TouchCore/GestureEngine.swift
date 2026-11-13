@@ -39,6 +39,8 @@ public final class GestureEngine {
     public var displayBounds = CGRect.zero
     /// Window/accessibility operations for the touch helpers. nil disables them all.
     public var windows: WindowService?
+    /// Points per millimetre of the touch display (0 = unknown). Physical thresholds fall back to fractions of the width.
+    public var pointsPerMM: CGFloat = 0
 
     private var mode = Mode.idle
     private var twoMode = TwoMode.undecided
@@ -60,6 +62,12 @@ public final class GestureEngine {
     private var lastScrollTime = Date.distantPast
     private var cancelMomentum: Cancel?
     private var cancelPendingRightClick: Cancel?   // right-click deferred so a second two-finger tap can become smart zoom
+    private var lockedDrag = false                // a drag is being held after the finger lifted (drag lock)
+    private var cancelDragLock: Cancel?
+    private var twoEdge = false                // the two-finger touch began at the right screen edge
+    private let twoHoldMin: TimeInterval = 0.6
+    private var multiStart = Date.distantPast
+    private var multiLastC = CGPoint.zero
     private var lastTwoTapTime = Date.distantPast
     private var lastTwoTapPt = CGPoint.zero
     private var momRemX = 0.0, momRemY = 0.0
@@ -93,6 +101,7 @@ public final class GestureEngine {
     private let doubleTapRadius: CGFloat = 30
     private let twoTapMaxDuration: TimeInterval = 0.3
     private let flickMaxDuration: TimeInterval = 0.4   // a two-finger flick (back/forward) must be this quick
+    private let flickMM: CGFloat = 25                 // physical travel for a flick when the display size is known
     private let flickDistance: CGFloat = 0.08          // and travel this fraction of the display width
     private let momentumMinSpeed = 250.0          // flick speed needed to coast
     private let momentumStopSpeed = 40.0
@@ -113,6 +122,7 @@ public final class GestureEngine {
     public func update(points pts: [CGPoint], displayWidth W: CGFloat) {
         let cfg = config()
         let n = pts.count
+        if n > 5 { return }   // palm or ghost contacts: keep the last good state
         if n > 0 { stopMomentum() }
         if n == 0 { finish(cfg); return }
 
@@ -121,6 +131,17 @@ public final class GestureEngine {
 
         switch mode {
         case .idle:
+            if lockedDrag {
+                if n == 1 {   // continue the held drag from the new finger position
+                    cancelDragLock?(); cancelDragLock = nil; lockedDrag = false
+                    log?("drag lock: resumed")
+                    lastPt = pts[0]; startPt = pts[0]
+                    sink.mouse(.leftDrag, at: pts[0], clicks: 1)
+                    mode = .dragging
+                    break
+                }
+                releaseDragLock()
+            }
             if n == 1 { beginPending(pts[0], cfg) }
             else if n == 2 { beginTwo(pts, c, s) }
             else { beginMulti(n, c, s, cfg) }
@@ -177,7 +198,7 @@ public final class GestureEngine {
         case .multi:
             if n == multiN { handleMulti(c, s, W, cfg) }
             else if n >= 3 { endSwipe(); multiN = n; baseC = c; baseS = s; if n != 3 { endWinDrag() } }   // finger count changed: re-baseline
-            else { endSwipe(); endWinDrag(); mode = .consumed }
+            else { endMulti(cfg); mode = .consumed }
 
         case .consumed:
             break
@@ -186,6 +207,7 @@ public final class GestureEngine {
 
     /// Release anything held (e.g. a drag in progress). Call when disabling or shutting down.
     public func reset() {
+        releaseDragLock()
         endLongPress()
         cancelPendingRightClick?(); cancelPendingRightClick = nil
         stopMomentum()
@@ -284,8 +306,20 @@ public final class GestureEngine {
 
     private func endLongPress() { cancelLongPress?(); cancelLongPress = nil; cancelGrab?(); cancelGrab = nil }
 
+    private func releaseDragLock() {
+        guard lockedDrag else { return }
+        cancelDragLock?(); cancelDragLock = nil; lockedDrag = false
+        log?("drag lock: released")
+        sink.mouse(.leftUp, at: lastPt, clicks: 1)
+    }
+
     private func beginTwo(_ pts: [CGPoint], _ c: CGPoint, _ s: CGFloat) {
         endLongPress()
+        let cfg = config()
+        let b = displayBounds
+        twoEdge = false
+        if b != .zero, cfg.gesturesEnabled, !cfg.shortcut(for: .edge2Right).isDisabled,
+           let right = pts.map(\.x).max(), b.maxX - right <= CGFloat(cfg.edgeWidth) * b.width { twoEdge = true }
         mode = .two; twoMode = .undecided
         baseC = c; baseS = s; refS = s; lastC = c
         baseAngle = Self.angle(pts); lastAngle = baseAngle; rotAccum = 0
@@ -297,7 +331,13 @@ public final class GestureEngine {
         endNativePinch()
         switch twoMode {
         case .undecided:
-            guard now().timeIntervalSince(twoStart) < twoTapMaxDuration else { break }
+            let held = now().timeIntervalSince(twoStart)
+            if held >= twoHoldMin, cfg.gesturesEnabled, !cfg.shortcut(for: .keyboard).isDisabled {
+                log?("two-finger hold: keyboard")
+                fire(.keyboard, cfg)
+                break
+            }
+            guard held < twoTapMaxDuration else { break }
             let zoomOn = cfg.gesturesEnabled && !cfg.shortcut(for: .smartZoom).isDisabled
             if zoomOn, cancelPendingRightClick != nil,
                now().timeIntervalSince(lastTwoTapTime) < cfg.doubleTapWindow,
@@ -342,8 +382,9 @@ public final class GestureEngine {
     /// A quick, mostly horizontal two-finger stroke that lifted while still moving, if one is bound.
     private func flick(_ cfg: TouchConfig) -> GestureID? {
         let dx = lastC.x - baseC.x, dy = lastC.y - baseC.y
+        let need = pointsPerMM > 0 ? flickMM * pointsPerMM : flickDistance * displayBounds.width
         guard now().timeIntervalSince(twoStart) < flickMaxDuration,
-              abs(dx) > flickDistance * displayBounds.width, abs(dx) > 2 * abs(dy) else { return nil }
+              abs(dx) > need, abs(dx) > 2 * abs(dy) else { return nil }
         let id: GestureID = dx < 0 ? .swipe2Left : .swipe2Right
         return cfg.shortcut(for: id).isDisabled ? nil : id
     }
@@ -370,6 +411,8 @@ public final class GestureEngine {
         if first { fired = false }
         mode = .multi
         multiN = n; baseC = c; baseS = s
+        if first { multiStart = now() }
+        multiLastC = c
         if first, n == 3, cfg.windowThreeFingerDrag, let w = windows, let info = w.window(at: c) {
             dragWin = info; winDragC = c
             log?("window drag")
@@ -408,6 +451,9 @@ public final class GestureEngine {
             sink.mouse(.rightUp, at: startPt, clicks: 1)
         } else if mode == .grab {
             endGrab()
+        } else if mode == .dragging, cfg.dragLock, titleWin == nil {
+            lockedDrag = true   // keep the button down; a new touch within the timeout continues the drag
+            cancelDragLock = schedule(cfg.dragLockTimeout) { [weak self] in self?.releaseDragLock() }
         } else if mode == .dragging {
             sink.mouse(.leftUp, at: lastPt, clicks: 1)
             if let t = titleWin, let w = windows {
@@ -417,8 +463,7 @@ public final class GestureEngine {
         } else if mode == .two {
             endTwo(cfg)
         } else if mode == .multi {
-            endSwipe()
-            endWinDrag()
+            endMulti(cfg)
         }
         titleWin = nil
         mode = .idle; fired = false; multiN = 0; edgeStart = nil
@@ -439,6 +484,16 @@ public final class GestureEngine {
         switch twoMode {
         case .undecided:
             let dc = Self.dist(c, baseC), ds = abs(s - baseS)
+            if twoEdge {   // hold back scrolling until we know whether this is the edge swipe
+                let need = CGFloat(cfg.swipeDistance) * W
+                if baseC.x - c.x > need && baseC.x - c.x > abs(c.y - baseC.y) {
+                    log?("two-finger edge swipe")
+                    twoEdge = false
+                    fire(.edge2Right, cfg)
+                    mode = .consumed
+                } else if dc > need { twoEdge = false }
+                return
+            }
             let native = cfg.gesturesEnabled && cfg.nativeGestures
             // A twist: the fingers turn around their midpoint further than the midpoint travels.
             let twist = abs(Self.wrapDegrees(angle - baseAngle))
@@ -510,6 +565,7 @@ public final class GestureEngine {
     // MARK: - Three or more fingers: swipe / pinch
 
     private func handleMulti(_ c: CGPoint, _ s: CGFloat, _ W: CGFloat, _ cfg: TouchConfig) {
+        multiLastC = c
         if let w = dragWin, cfg.windowThreeFingerDrag, multiN == 3 {
             winDragC = c
             windows?.setFrame(w.id, w.frame.offsetBy(dx: c.x - baseC.x, dy: c.y - baseC.y))
@@ -547,6 +603,17 @@ public final class GestureEngine {
             if r < multiPinchIn { fired = true; log?("pinch4In"); fire(.pinch4In, cfg) }
             else if r > multiPinchOut { fired = true; log?("pinch4Out"); fire(.pinch4Out, cfg) }
         }
+    }
+
+    /// A quick three-finger touch that barely moved is a tap.
+    private func endMulti(_ cfg: TouchConfig) {
+        defer { endSwipe(); endWinDrag() }
+        guard cfg.gesturesEnabled, multiN == 3, !fired, swipeAxis == nil, dragWin == nil || !cfg.windowThreeFingerDrag,
+              now().timeIntervalSince(multiStart) < twoTapMaxDuration,
+              Self.dist(multiLastC, baseC) < doubleTapRadius else { return }
+        log?("three-finger tap")
+        sink.mouse(.move, at: baseC, clicks: 1)
+        fire(.tap3, cfg)
     }
 
     /// Fingers moving left or up count as positive progress (next Space / Mission Control).

@@ -4,7 +4,7 @@ import Foundation
 /// Every gesture that can be bound to a shortcut.
 public enum GestureID: String, CaseIterable, Sendable {
     case pinch2In, pinch2Out
-    case swipe2Left, swipe2Right, smartZoom   // two-finger flick (opt-in) and two-finger double-tap (opt-in)
+    case swipe2Left, swipe2Right, smartZoom, tap3, edge2Right, keyboard   // two-finger flick (opt-in) and two-finger double-tap (opt-in)
     case swipe3Left, swipe3Right, swipe3Up, swipe3Down
     case swipe4Left, swipe4Right, swipe4Up, swipe4Down
     case pinch4In, pinch4Out
@@ -21,7 +21,8 @@ public enum GestureID: String, CaseIterable, Sendable {
     public var fingers: Int {
         switch self {
         case .edgeLeft, .edgeRight, .edgeTop, .edgeBottom: return 1
-        case .pinch2In, .pinch2Out, .swipe2Left, .swipe2Right, .smartZoom: return 2
+        case .pinch2In, .pinch2Out, .swipe2Left, .swipe2Right, .smartZoom, .edge2Right, .keyboard: return 2
+        case .tap3: return 3
         case .swipe3Left, .swipe3Right, .swipe3Up, .swipe3Down: return 3
         case .swipe4Left, .swipe4Right, .swipe4Up, .swipe4Down, .pinch4In, .pinch4Out: return 4
         case .swipe5Left, .swipe5Right, .swipe5Up, .swipe5Down: return 5
@@ -34,6 +35,9 @@ public enum GestureID: String, CaseIterable, Sendable {
         case .edgeRight: return "From right edge"
         case .edgeTop: return "From top edge"
         case .edgeBottom: return "From bottom edge"
+        case .tap3: return "Tap (Look Up)"
+        case .edge2Right: return "From right edge (Notification Center)"
+        case .keyboard: return "Hold still (on-screen keyboard)"
         case .swipe2Left: return "Flick left"
         case .swipe2Right: return "Flick right"
         case .smartZoom: return "Double-tap (smart zoom)"
@@ -52,7 +56,8 @@ public enum GestureID: String, CaseIterable, Sendable {
         let cf = Shortcut.ctrlFn
         switch self {
         case .edgeLeft, .edgeRight, .edgeTop, .edgeBottom: return .disabled   // opt-in
-        case .swipe2Left, .swipe2Right, .smartZoom: return .disabled   // opt-in
+        case .swipe2Left, .swipe2Right, .smartZoom, .edge2Right, .keyboard: return .disabled   // opt-in
+        case .tap3: return Shortcut(keyCode: 2, flags: [.maskControl, .maskCommand])   // ⌃⌘D: Look Up
         case .pinch2In: return Shortcut(keyCode: Shortcut.kMinus, flags: .maskCommand)
         case .pinch2Out: return Shortcut(keyCode: Shortcut.kEqual, flags: .maskCommand)
         case .pinch4In: return Shortcut(keyCode: Shortcut.kF4)
@@ -93,6 +98,8 @@ public struct TouchConfig: Codable, Equatable, Sendable {
     public var windowSnap = true               // drag a window to a screen edge/corner to tile it; double-tap title bar maximizes
     public var touchMagnet = true              // taps near a small control snap to it
     public var touchRipple = true              // brief circle at each new contact
+    public var dragLock = false                // lifting during a drag keeps it held for dragLockTimeout; touch again to continue
+    public var dragLockTimeout = 1.5           // seconds
     public var holdToSelect = false            // hold, then drag selects by word; right-click moves to release
     public var tripleTapSelectLine = true      // third quick tap sends a triple-click
     public var grabZone = 24.0                 // points around a window edge that can be grabbed
@@ -179,6 +186,8 @@ public struct TouchConfig: Codable, Equatable, Sendable {
         windowSnap = try c.decodeIfPresent(Bool.self, forKey: .windowSnap) ?? d.windowSnap
         touchMagnet = try c.decodeIfPresent(Bool.self, forKey: .touchMagnet) ?? d.touchMagnet
         touchRipple = try c.decodeIfPresent(Bool.self, forKey: .touchRipple) ?? d.touchRipple
+        dragLock = try c.decodeIfPresent(Bool.self, forKey: .dragLock) ?? d.dragLock
+        dragLockTimeout = try c.decodeIfPresent(Double.self, forKey: .dragLockTimeout) ?? d.dragLockTimeout
         holdToSelect = try c.decodeIfPresent(Bool.self, forKey: .holdToSelect) ?? d.holdToSelect
         tripleTapSelectLine = try c.decodeIfPresent(Bool.self, forKey: .tripleTapSelectLine) ?? d.tripleTapSelectLine
         grabZone = try c.decodeIfPresent(Double.self, forKey: .grabZone) ?? d.grabZone

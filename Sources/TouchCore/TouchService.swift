@@ -114,7 +114,10 @@ public final class TouchService {
     }
 
     public func refreshDisplay() {
-        bounds = CGDisplayBounds(Displays.target(preferred: config.displayID))
+        let did = Displays.target(preferred: config.displayID)
+        bounds = CGDisplayBounds(did)
+        let mm = CGDisplayScreenSize(did).width      // physical width; 0 or NaN when the display doesn't report it
+        engine.pointsPerMM = mm > 0 && mm.isFinite ? bounds.width / mm : 0
     }
 
     // MARK: Touch handling

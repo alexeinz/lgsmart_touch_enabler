@@ -82,6 +82,9 @@ Run only one of the app or the daemon at a time, since both would inject events.
 | 2 fingers drag | scroll (natural direction, invertible), coasts after a flick |
 | 2 fingers quick tap | right-click |
 | 2 fingers quick flick left / right | off by default; bind to ⌘[ / ⌘] for browser Back / Forward |
+| 2 fingers swipe in from right edge | off by default; bind to a Notification Center shortcut |
+| 2 fingers hold still (0.6 s) | off by default; bind to an on-screen keyboard shortcut |
+| 3 fingers quick tap | Look Up (⌃⌘D), rebindable |
 | 2 fingers double-tap | off by default; bind to a smart-zoom shortcut (a single tap then waits briefly before right-clicking) |
 | 2 fingers pinch in / out | ⌘− / ⌘= (zoom), or a real zoom gesture with native gestures on |
 | 2 fingers twist | rotate gesture (native gestures only) |
@@ -131,7 +134,7 @@ touchd config reset
 Sources/TouchCore/    gesture engine, config, HID source, CG event output (library, unit-tested)
 Sources/touchd/       CLI daemon
 Sources/TouchdApp/    SwiftUI menu-bar settings app
-Tests/TouchCoreTests/ Swift Testing suite (93 tests)
+Tests/TouchCoreTests/ Swift Testing suite (104 tests)
 scripts/              build-app.sh, setup-signing.sh, make-dmg.sh, install-launchagent.sh, test.sh
 legacy/               original single-file prototypes, kept for reference
 ```

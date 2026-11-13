@@ -244,6 +244,7 @@ private struct WindowsTab: View {
             }
             Section("Text selection") {
                 Toggle("Hold, then drag to select text (hold without moving still right-clicks)", isOn: $model.config.holdToSelect)
+                Toggle("Drag lock: keep a drag held briefly after lifting, touch again to continue", isOn: $model.config.dragLock)
                 Toggle("Triple-tap selects a line or paragraph", isOn: $model.config.tripleTapSelectLine)
             }
         }
