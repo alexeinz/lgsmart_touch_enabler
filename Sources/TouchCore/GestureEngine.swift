@@ -8,7 +8,18 @@ public protocol EventSink: AnyObject {
     func mouse(_ kind: MouseEventKind, at p: CGPoint, clicks: Int)
     func scroll(dx: Int, dy: Int)
     func key(_ code: UInt16, flags: CGEventFlags)
+    /// Trackpad-style zoom. `delta` is the relative size change since the last event (additive).
+    func magnify(_ delta: Double, phase: GesturePhase)
+    /// Trackpad-style rotation in degrees since the last event, counter-clockwise positive.
+    func rotate(_ degrees: Double, phase: GesturePhase)
+    /// Spaces / Mission Control swipe that follows the fingers. `progress` is the total travel since
+    /// the gesture began (1 = one full swipe); `velocity` (progress per second) matters on `.ended`.
+    func dockSwipe(_ axis: SwipeAxis, progress: Double, velocity: Double, phase: GesturePhase)
 }
+
+/// Raw values are the phase codes macOS uses in gesture events.
+public enum GesturePhase: Int, Sendable { case began = 1, changed = 2, ended = 4 }
+public enum SwipeAxis: Int, Sendable { case horizontal = 1, vertical = 2 }
 
 /// Turns a stream of finger positions (screen points) into clicks, drags, scrolls and shortcuts.
 /// Pure logic: no HID, no CoreGraphics event posting, time and timers are injected.
@@ -48,6 +59,9 @@ public final class GestureEngine {
     private var velX = 0.0, velY = 0.0            // scroll velocity, output units per second
     private var lastScrollTime = Date.distantPast
     private var cancelMomentum: Cancel?
+    private var cancelPendingRightClick: Cancel?   // right-click deferred so a second two-finger tap can become smart zoom
+    private var lastTwoTapTime = Date.distantPast
+    private var lastTwoTapPt = CGPoint.zero
     private var momRemX = 0.0, momRemY = 0.0
     private var tapCount = 0
     private var grabCandidate: (win: WindowInfo, edges: GrabEdges)?
@@ -57,14 +71,29 @@ public final class GestureEngine {
     private var dragWin: WindowInfo?              // window being moved by three fingers
     private var winDragC = CGPoint.zero
     private var restoreFrames: [Int: CGRect] = [:]
+    private var baseAngle = 0.0                   // two-finger angle (degrees) at gesture start
+    private var lastAngle = 0.0
+    private var lastS: CGFloat = 0                // spread at the last native magnify event
+    private var nativePinch = false               // a native magnify stream is open
+    private var rotating = false                  // a native rotate stream is open
+    private var rotAccum = 0.0                    // rotation seen before the rotate stream opens
+    private var swipeAxis: SwipeAxis?             // set while a native dock swipe is open
+    private var swipeProgress = 0.0
+    private var swipeVel = 0.0
+    private var lastSwipeTime = Date.distantPast
 
     // Fixed geometry, relative to display width.
     private let scrollStart: CGFloat = 0.006
     private let pinchStart: CGFloat = 0.010
     private let multiPinchIn: CGFloat = 0.7
     private let multiPinchOut: CGFloat = 1.4
+    private let rotateStart = 4.0                 // degrees of twist that count as a deliberate rotation
+    private let rotateStreamStart = 5.0           // degrees before rotate events start during a pinch
+    private let swipeLock: CGFloat = 0.02         // travel that locks a native swipe to an axis
     private let doubleTapRadius: CGFloat = 30
     private let twoTapMaxDuration: TimeInterval = 0.3
+    private let flickMaxDuration: TimeInterval = 0.4   // a two-finger flick (back/forward) must be this quick
+    private let flickDistance: CGFloat = 0.08          // and travel this fraction of the display width
     private let momentumMinSpeed = 250.0          // flick speed needed to coast
     private let momentumStopSpeed = 40.0
     private let momentumTick: TimeInterval = 1.0 / 60
@@ -93,7 +122,7 @@ public final class GestureEngine {
         switch mode {
         case .idle:
             if n == 1 { beginPending(pts[0], cfg) }
-            else if n == 2 { beginTwo(c, s) }
+            else if n == 2 { beginTwo(pts, c, s) }
             else { beginMulti(n, c, s, cfg) }
 
         case .pending:
@@ -109,7 +138,7 @@ public final class GestureEngine {
                         titleWin = info
                     }
                 }
-            } else if n == 2 { beginTwo(c, s) }
+            } else if n == 2 { beginTwo(pts, c, s) }
             else { beginMulti(n, c, s, cfg) }
 
         case .held:
@@ -121,7 +150,7 @@ public final class GestureEngine {
                     lastPt = pts[0]
                     mode = .dragging
                 }
-            } else if n == 2 { beginTwo(c, s) }
+            } else if n == 2 { beginTwo(pts, c, s) }
             else { beginMulti(n, c, s, cfg) }
 
         case .grab:
@@ -141,14 +170,14 @@ public final class GestureEngine {
             }
 
         case .two:
-            if n == 2 { handleTwo(c, s, W, cfg) }
-            else if n >= 3 { beginMulti(n, c, s, cfg) }
+            if n == 2 { handleTwo(pts, c, s, W, cfg) }
+            else if n >= 3 { endNativePinch(); beginMulti(n, c, s, cfg) }
             else { endTwo(cfg); mode = .consumed }
 
         case .multi:
             if n == multiN { handleMulti(c, s, W, cfg) }
-            else if n >= 3 { multiN = n; baseC = c; baseS = s; if n != 3 { endWinDrag() } }   // finger count changed: re-baseline
-            else { endWinDrag(); mode = .consumed }
+            else if n >= 3 { endSwipe(); multiN = n; baseC = c; baseS = s; if n != 3 { endWinDrag() } }   // finger count changed: re-baseline
+            else { endSwipe(); endWinDrag(); mode = .consumed }
 
         case .consumed:
             break
@@ -158,10 +187,12 @@ public final class GestureEngine {
     /// Release anything held (e.g. a drag in progress). Call when disabling or shutting down.
     public func reset() {
         endLongPress()
+        cancelPendingRightClick?(); cancelPendingRightClick = nil
         stopMomentum()
         if mode == .dragging { sink.mouse(.leftUp, at: lastPt, clicks: 1) }
         endGrab(); titleWin = nil; windows?.showPreview(nil)
         dragWin = nil
+        endNativePinch(); endSwipe()
         mode = .idle; fired = false; multiN = 0; edgeStart = nil
         scrollRemX = 0; scrollRemY = 0
     }
@@ -253,24 +284,51 @@ public final class GestureEngine {
 
     private func endLongPress() { cancelLongPress?(); cancelLongPress = nil; cancelGrab?(); cancelGrab = nil }
 
-    private func beginTwo(_ c: CGPoint, _ s: CGFloat) {
+    private func beginTwo(_ pts: [CGPoint], _ c: CGPoint, _ s: CGFloat) {
         endLongPress()
         mode = .two; twoMode = .undecided
         baseC = c; baseS = s; refS = s; lastC = c
+        baseAngle = Self.angle(pts); lastAngle = baseAngle; rotAccum = 0
         twoStart = now(); lastScrollTime = twoStart; velX = 0; velY = 0
     }
 
     /// Called when a two-finger gesture ends (a finger lifted). Handles two-finger tap and flick momentum.
     private func endTwo(_ cfg: TouchConfig) {
+        endNativePinch()
         switch twoMode {
         case .undecided:
-            if cfg.twoFingerTapRightClick, now().timeIntervalSince(twoStart) < twoTapMaxDuration {
-                log?("two-finger tap: right-click")
+            guard now().timeIntervalSince(twoStart) < twoTapMaxDuration else { break }
+            let zoomOn = cfg.gesturesEnabled && !cfg.shortcut(for: .smartZoom).isDisabled
+            if zoomOn, cancelPendingRightClick != nil,
+               now().timeIntervalSince(lastTwoTapTime) < cfg.doubleTapWindow,
+               Self.dist(lastTwoTapPt, baseC) < doubleTapRadius * 2 {
+                cancelPendingRightClick?(); cancelPendingRightClick = nil
+                lastTwoTapTime = .distantPast
+                log?("two-finger double-tap: smart zoom")
                 sink.mouse(.move, at: baseC, clicks: 1)
-                sink.mouse(.rightDown, at: baseC, clicks: 1)
-                sink.mouse(.rightUp, at: baseC, clicks: 1)
+                fire(.smartZoom, cfg)
+            } else if cfg.twoFingerTapRightClick {
+                let p = baseC
+                let rightClick = { [weak self] in
+                    guard let self else { return }
+                    self.cancelPendingRightClick = nil
+                    self.log?("two-finger tap: right-click")
+                    self.sink.mouse(.move, at: p, clicks: 1)
+                    self.sink.mouse(.rightDown, at: p, clicks: 1)
+                    self.sink.mouse(.rightUp, at: p, clicks: 1)
+                }
+                if zoomOn {   // wait out the double-tap window before committing to a right-click
+                    cancelPendingRightClick?()
+                    lastTwoTapTime = now(); lastTwoTapPt = p
+                    cancelPendingRightClick = schedule(cfg.doubleTapWindow, rightClick)
+                } else { rightClick() }
             }
         case .scroll:
+            if cfg.gesturesEnabled, let id = flick(cfg) {
+                log?("two-finger flick")
+                fire(id, cfg)
+                break
+            }
             let speed = hypot(velX, velY)
             if cfg.momentumScroll, now().timeIntervalSince(lastScrollTime) < 0.08, speed > momentumMinSpeed {
                 log?("momentum scroll")
@@ -279,6 +337,15 @@ public final class GestureEngine {
             }
         case .pinch: break
         }
+    }
+
+    /// A quick, mostly horizontal two-finger stroke that lifted while still moving, if one is bound.
+    private func flick(_ cfg: TouchConfig) -> GestureID? {
+        let dx = lastC.x - baseC.x, dy = lastC.y - baseC.y
+        guard now().timeIntervalSince(twoStart) < flickMaxDuration,
+              abs(dx) > flickDistance * displayBounds.width, abs(dx) > 2 * abs(dy) else { return nil }
+        let id: GestureID = dx < 0 ? .swipe2Left : .swipe2Right
+        return cfg.shortcut(for: id).isDisabled ? nil : id
     }
 
     private func scheduleMomentum() {
@@ -350,6 +417,7 @@ public final class GestureEngine {
         } else if mode == .two {
             endTwo(cfg)
         } else if mode == .multi {
+            endSwipe()
             endWinDrag()
         }
         titleWin = nil
@@ -366,24 +434,61 @@ public final class GestureEngine {
 
     // MARK: - Two fingers: scroll or pinch
 
-    private func handleTwo(_ c: CGPoint, _ s: CGFloat, _ W: CGFloat, _ cfg: TouchConfig) {
+    private func handleTwo(_ pts: [CGPoint], _ c: CGPoint, _ s: CGFloat, _ W: CGFloat, _ cfg: TouchConfig) {
+        let angle = Self.angle(pts)
         switch twoMode {
         case .undecided:
             let dc = Self.dist(c, baseC), ds = abs(s - baseS)
-            if cfg.gesturesEnabled && ds > pinchStart * W && ds > dc {
+            let native = cfg.gesturesEnabled && cfg.nativeGestures
+            // A twist: the fingers turn around their midpoint further than the midpoint travels.
+            let twist = abs(Self.wrapDegrees(angle - baseAngle))
+            let arc = CGFloat(twist * .pi / 180) * s
+            let rotated = native && twist > rotateStart && arc > pinchStart * W && arc > dc
+            if (cfg.gesturesEnabled && ds > pinchStart * W && ds > dc) || rotated {
                 twoMode = .pinch; refS = s
+                if native {
+                    log?("native pinch")
+                    nativePinch = true; lastS = s      // lastAngle stays at the start so the twist so far counts
+                    sink.mouse(.move, at: c, clicks: 1)   // gesture events go to the window under the pointer
+                    sink.magnify(0, phase: .began)
+                }
             } else if dc > scrollStart * W {
                 twoMode = .scroll; lastC = baseC
                 emitScroll(c.x - lastC.x, c.y - lastC.y, cfg); lastC = c
             }
         case .scroll:
             emitScroll(c.x - lastC.x, c.y - lastC.y, cfg); lastC = c
+        case .pinch where nativePinch:
+            if s != lastS {
+                sink.magnify(Double(s / max(lastS, 1)) - 1, phase: .changed)
+                lastS = s
+            }
+            let d = Self.wrapDegrees(angle - lastAngle)
+            lastAngle = angle
+            // Screen y points down, so a positive angle change is clockwise; NSEvent wants the opposite.
+            if rotating {
+                if d != 0 { sink.rotate(-d, phase: .changed) }
+            } else {
+                rotAccum += d
+                if abs(rotAccum) > rotateStreamStart {
+                    rotating = true
+                    sink.rotate(0, phase: .began)
+                    sink.rotate(-rotAccum, phase: .changed)
+                }
+            }
         case .pinch:
             let r = s / max(refS, 1)
             let step = CGFloat(cfg.zoomStep)
             if r > step { log?("zoom in"); fire(.pinch2Out, cfg); refS = s }
             else if r < 1 / step { log?("zoom out"); fire(.pinch2In, cfg); refS = s }
         }
+    }
+
+    /// Closes any open native magnify / rotate stream.
+    private func endNativePinch() {
+        if rotating { sink.rotate(0, phase: .ended); rotating = false }
+        if nativePinch { sink.magnify(0, phase: .ended); nativePinch = false }
+        rotAccum = 0
     }
 
     /// Scroll with sub-pixel accumulation so slow speeds don't round to nothing.
@@ -411,9 +516,23 @@ public final class GestureEngine {
             if cfg.windowSnap, let svc = windows { svc.showPreview(Snap.rect(for: c, in: svc.usableBounds(containing: c))) }
             return
         }
-        guard cfg.gesturesEnabled, !fired, (3...5).contains(multiN) else { return }
+        guard cfg.gesturesEnabled, (3...5).contains(multiN) else { return }
         let dx = c.x - baseC.x, dy = c.y - baseC.y
-        if max(abs(dx), abs(dy)) > CGFloat(cfg.swipeDistance) * W {
+        if let axis = swipeAxis { updateSwipe(axis, dx, dy, W); return }
+        guard !fired else { return }
+        let travel = max(abs(dx), abs(dy))
+        if cfg.nativeSwipes {
+            // Follow the fingers instead of firing a shortcut once.
+            if travel > swipeLock * W, travel > abs(s - baseS) {
+                fired = true
+                let axis: SwipeAxis = abs(dx) > abs(dy) ? .horizontal : .vertical
+                log?("native swipe \(axis == .horizontal ? "horizontal" : "vertical")")
+                swipeAxis = axis; swipeProgress = 0; swipeVel = 0; lastSwipeTime = now()
+                baseC = c                           // progress counts from the lock point
+                sink.dockSwipe(axis, progress: 0, velocity: 0, phase: .began)
+                return
+            }
+        } else if travel > CGFloat(cfg.swipeDistance) * W {
             fired = true
             let ids = GestureID.swipeIDs[multiN]!   // [left, right, up, down]
             let id: GestureID
@@ -421,11 +540,35 @@ public final class GestureEngine {
             else { id = dy < 0 ? ids[2] : ids[3] }
             log?("\(id.rawValue)")
             fire(id, cfg)
-        } else if multiN >= 4 {
+            return
+        }
+        if multiN >= 4 {
             let r = s / max(baseS, 1)
             if r < multiPinchIn { fired = true; log?("pinch4In"); fire(.pinch4In, cfg) }
             else if r > multiPinchOut { fired = true; log?("pinch4Out"); fire(.pinch4Out, cfg) }
         }
+    }
+
+    /// Fingers moving left or up count as positive progress (next Space / Mission Control).
+    private func updateSwipe(_ axis: SwipeAxis, _ dx: CGFloat, _ dy: CGFloat, _ W: CGFloat) {
+        let h = displayBounds.height > 0 ? displayBounds.height : W
+        let p = axis == .horizontal ? Double(-dx / max(W, 1)) : Double(-dy / max(h, 1))
+        let t = now(), dt = t.timeIntervalSince(lastSwipeTime)
+        if dt > 0.002 {
+            swipeVel = 0.5 * swipeVel + 0.5 * (p - swipeProgress) / dt
+            lastSwipeTime = t
+        }
+        guard p != swipeProgress else { return }
+        swipeProgress = p
+        sink.dockSwipe(axis, progress: p, velocity: swipeVel, phase: .changed)
+    }
+
+    private func endSwipe() {
+        guard let axis = swipeAxis else { return }
+        swipeAxis = nil
+        // A finger that rested before lifting is not a flick.
+        let v = now().timeIntervalSince(lastSwipeTime) < 0.1 ? swipeVel : 0
+        sink.dockSwipe(axis, progress: swipeProgress, velocity: v, phase: .ended)
     }
 
     private func fire(_ id: GestureID, _ cfg: TouchConfig) {
@@ -441,6 +584,19 @@ public final class GestureEngine {
     static func centroid(_ pts: [CGPoint]) -> CGPoint {
         CGPoint(x: pts.map { $0.x }.reduce(0, +) / CGFloat(pts.count),
                 y: pts.map { $0.y }.reduce(0, +) / CGFloat(pts.count))
+    }
+
+    /// Direction from the first to the second point, in degrees. 0 with fewer than two points.
+    static func angle(_ pts: [CGPoint]) -> Double {
+        guard pts.count >= 2 else { return 0 }
+        return Double(atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x)) * 180 / .pi
+    }
+
+    /// Wraps an angle difference into (-90, 90], so the two fingers swapping order reads as no turn.
+    static func wrapDegrees(_ d: Double) -> Double {
+        var r = d.truncatingRemainder(dividingBy: 180)
+        if r > 90 { r -= 180 } else if r <= -90 { r += 180 }
+        return r
     }
 
     static func spread(_ pts: [CGPoint], _ c: CGPoint) -> CGFloat {

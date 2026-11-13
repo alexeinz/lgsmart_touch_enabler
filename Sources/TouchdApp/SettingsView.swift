@@ -138,7 +138,25 @@ private struct GeneralTab: View {
                 Picker("Panel rotation", selection: $model.config.rotation) {
                     ForEach([0, 90, 180, 270], id: \.self) { Text("\($0)°").tag($0) }
                 }
-                Text("Set this if touches land in the wrong place after rotating the monitor.")
+                .disabled(model.config.calibration != nil)
+                Text(model.config.calibration == nil
+                     ? "Set this if touches land in the wrong place after rotating the monitor."
+                     : "Calibrated: the calibration replaces the rotation setting.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("Calibrate…") { model.startCalibration() }
+                        .disabled(!model.config.enabled || !model.status.deviceConnected || model.calibrating)
+                    Button("Clear calibration") { model.clearCalibration() }
+                        .disabled(model.config.calibration == nil)
+                }
+                Text(model.calibrationMessage
+                     ?? "Shows five targets on the touch display. Touch each one; touches click nothing while it runs.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Native gestures (experimental)") {
+                Toggle("Pinch and rotate as real trackpad gestures", isOn: $model.config.nativeGestures)
+                Toggle("Spaces and Mission Control follow 3 to 5 finger swipes", isOn: $model.config.nativeSwipes)
+                Text("Sends synthetic gesture events instead of keyboard shortcuts. Uses undocumented macOS events; turn off if an app misbehaves.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Status") {
@@ -530,6 +548,10 @@ private struct TestPadTab: View {
                 Text("\(model.touches.count) contact\(model.touches.count == 1 ? "" : "s")")
                     .monospacedDigit()
                 Spacer()
+                if let m = model.recordMessage { Text(m).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                Button(model.recording ? "Stop recording" : "Record trace") { model.toggleRecording() }
+                    .tint(model.recording ? .red : nil)
+                Button("Show traces") { model.revealTrace() }
                 Button("Clear trail") { trail.removeAll() }
             }
         }

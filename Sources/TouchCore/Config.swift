@@ -4,6 +4,7 @@ import Foundation
 /// Every gesture that can be bound to a shortcut.
 public enum GestureID: String, CaseIterable, Sendable {
     case pinch2In, pinch2Out
+    case swipe2Left, swipe2Right, smartZoom   // two-finger flick (opt-in) and two-finger double-tap (opt-in)
     case swipe3Left, swipe3Right, swipe3Up, swipe3Down
     case swipe4Left, swipe4Right, swipe4Up, swipe4Down
     case pinch4In, pinch4Out
@@ -20,7 +21,7 @@ public enum GestureID: String, CaseIterable, Sendable {
     public var fingers: Int {
         switch self {
         case .edgeLeft, .edgeRight, .edgeTop, .edgeBottom: return 1
-        case .pinch2In, .pinch2Out: return 2
+        case .pinch2In, .pinch2Out, .swipe2Left, .swipe2Right, .smartZoom: return 2
         case .swipe3Left, .swipe3Right, .swipe3Up, .swipe3Down: return 3
         case .swipe4Left, .swipe4Right, .swipe4Up, .swipe4Down, .pinch4In, .pinch4Out: return 4
         case .swipe5Left, .swipe5Right, .swipe5Up, .swipe5Down: return 5
@@ -33,6 +34,9 @@ public enum GestureID: String, CaseIterable, Sendable {
         case .edgeRight: return "From right edge"
         case .edgeTop: return "From top edge"
         case .edgeBottom: return "From bottom edge"
+        case .swipe2Left: return "Flick left"
+        case .swipe2Right: return "Flick right"
+        case .smartZoom: return "Double-tap (smart zoom)"
         case .pinch2In: return "Pinch in"
         case .pinch2Out: return "Spread out"
         case .pinch4In: return "Pinch in (4–5 fingers)"
@@ -48,6 +52,7 @@ public enum GestureID: String, CaseIterable, Sendable {
         let cf = Shortcut.ctrlFn
         switch self {
         case .edgeLeft, .edgeRight, .edgeTop, .edgeBottom: return .disabled   // opt-in
+        case .swipe2Left, .swipe2Right, .smartZoom: return .disabled   // opt-in
         case .pinch2In: return Shortcut(keyCode: Shortcut.kMinus, flags: .maskCommand)
         case .pinch2Out: return Shortcut(keyCode: Shortcut.kEqual, flags: .maskCommand)
         case .pinch4In: return Shortcut(keyCode: Shortcut.kF4)
@@ -94,6 +99,13 @@ public struct TouchConfig: Codable, Equatable, Sendable {
     public var grabHoldDelay = 0.25            // seconds to hold before the edge grab engages
     public var magnetRadius = 12.0             // points
 
+    /// Post real trackpad-style magnify/rotate events for two-finger pinch instead of shortcuts.
+    public var nativeGestures = false
+    /// Experimental: drive Spaces / Mission Control with dock-swipe events that follow the fingers.
+    public var nativeSwipes = false
+    /// Set by the calibration routine. When present it replaces `rotation`.
+    public var calibration: Calibration?
+
     // Device (advanced; edit the JSON file)
     public var vendorID = 0x284B
     public var productID = 0x8300
@@ -139,6 +151,7 @@ public struct TouchConfig: Codable, Equatable, Sendable {
         c.grabZone = min(max(c.grabZone, 8), 80)
         c.grabHoldDelay = min(max(c.grabHoldDelay, 0.1), 1)
         c.magnetRadius = min(max(c.magnetRadius, 2), 40)
+        if let cal = c.calibration, !cal.isValid { c.calibration = nil }
         return c
     }
 
@@ -171,6 +184,9 @@ public struct TouchConfig: Codable, Equatable, Sendable {
         grabZone = try c.decodeIfPresent(Double.self, forKey: .grabZone) ?? d.grabZone
         grabHoldDelay = try c.decodeIfPresent(Double.self, forKey: .grabHoldDelay) ?? d.grabHoldDelay
         magnetRadius = try c.decodeIfPresent(Double.self, forKey: .magnetRadius) ?? d.magnetRadius
+        nativeGestures = try c.decodeIfPresent(Bool.self, forKey: .nativeGestures) ?? d.nativeGestures
+        nativeSwipes = try c.decodeIfPresent(Bool.self, forKey: .nativeSwipes) ?? d.nativeSwipes
+        calibration = try? c.decodeIfPresent(Calibration.self, forKey: .calibration)
         vendorID = try c.decodeIfPresent(Int.self, forKey: .vendorID) ?? d.vendorID
         productID = try c.decodeIfPresent(Int.self, forKey: .productID) ?? d.productID
         bindings = try c.decodeIfPresent([String: Shortcut].self, forKey: .bindings) ?? [:]

@@ -31,6 +31,9 @@ public final class TouchService {
     private let engine: GestureEngine
     private var bounds = CGRect(x: 0, y: 0, width: 1920, height: 1080)
     private var wasTouching = false
+    /// While true, contacts are still reported through `onTouches` but produce no input events
+    /// (used by the calibration routine).
+    public var suspended = false { didSet { if suspended && !oldValue { engine.reset() } } }
 
     public init(config: TouchConfig, sink: EventSink = CGEventSink()) {
         self.config = config
@@ -116,13 +119,31 @@ public final class TouchService {
 
     // MARK: Touch handling
 
+    // MARK: Trace recording
+
+    public private(set) var recorder: TraceRecorder?
+    public var isRecording: Bool { recorder != nil }
+
+    public func startRecording() {
+        refreshDisplay()
+        recorder = TraceRecorder(rotation: config.rotation, bounds: bounds)
+    }
+
+    /// Stops recording and returns the trace (nil if nothing was touched).
+    public func stopRecording() -> TouchTrace? {
+        defer { recorder = nil }
+        guard let t = recorder?.trace, !t.frames.isEmpty else { return nil }
+        return t
+    }
+
     private func handle(_ normalized: [CGPoint]) {
+        recorder?.add(normalized)
         onTouches?(normalized)
-        guard config.enabled else { return }
+        guard config.enabled, !suspended else { return }
         let touching = !normalized.isEmpty
         if touching && !wasTouching { refreshDisplay() }   // pick up display changes between touches
         wasTouching = touching
-        let pts = normalized.map { Displays.map($0, rotation: config.rotation, bounds: bounds) }
+        let pts = normalized.map { Displays.map($0, rotation: config.rotation, calibration: config.calibration, bounds: bounds) }
         engine.displayBounds = bounds
         onScreenPoints?(pts)
         engine.update(points: pts, displayWidth: bounds.width)

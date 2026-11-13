@@ -16,12 +16,17 @@ final class AppModel: ObservableObject {
     @Published private(set) var displays: [DisplayInfo] = []
     @Published private(set) var touches: [CGPoint] = []
     @Published private(set) var logs: [LogStore.Entry] = LogStore.shared.snapshot
+    @Published private(set) var calibrating = false
+    @Published private(set) var calibrationMessage: String?
 
     let store = ConfigStore()
     private let service: TouchService
     private var timer: Timer?
     private let overlay = OverlayController()
     private let ax = AXWindowService()
+    private let calibrationOverlay = CalibrationOverlay()
+    private var calibrationSession: CalibrationSession?
+    private var calibrationTimeout: DispatchWorkItem?
 
     init() {
         let cfg = store.load()
@@ -31,7 +36,7 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async { self?.status = s }
         }
 
-        service.onTouches = { [weak self] pts in self?.touches = pts }
+        service.onTouches = { [weak self] pts in self?.touches = pts; self?.calibrationFeed(pts) }
         ax.onHandle = { [weak self] r in self?.overlay.setHandle(r) }
         ax.onPreview = { [weak self] r in self?.overlay.setPreview(r) }
         service.windows = ax
@@ -67,6 +72,33 @@ final class AppModel: ObservableObject {
         status = service.status
         displays = Displays.all()
         launchAtLogin = SMAppService.mainApp.status == .enabled
+    }
+
+    // MARK: Trace recording (Test tab)
+
+    @Published private(set) var recording = false
+    @Published private(set) var lastTrace: URL?
+    @Published private(set) var recordMessage: String?
+
+    func toggleRecording() {
+        if service.isRecording {
+            recording = false
+            guard let trace = service.stopRecording() else { recordMessage = "Nothing recorded: touch the screen while recording."; return }
+            let url = TouchTrace.newFileURL()
+            do {
+                try trace.write(to: url)
+                lastTrace = url
+                recordMessage = String(format: "Saved %d frames (%.1f s)", trace.frames.count, trace.duration)
+                LogStore.shared.log("Recorded trace \(url.lastPathComponent)")
+            } catch { recordMessage = "Could not save: \(error.localizedDescription)" }
+        } else {
+            service.startRecording(); recording = true; recordMessage = "Recording… perform the gesture, then press Stop."
+        }
+    }
+
+    func revealTrace() {
+        if let u = lastTrace { NSWorkspace.shared.activateFileViewerSelecting([u]) }
+        else { NSWorkspace.shared.open(TouchTrace.defaultDirectory) }
     }
 
     func setLaunchAtLogin(_ on: Bool) {
@@ -117,6 +149,64 @@ final class AppModel: ObservableObject {
             return
         }
         NSApp.terminate(nil)
+    }
+
+    // MARK: Calibration
+
+    /// Shows targets on the touch display and fits a correction from where the touches land.
+    /// Input injection is suspended meanwhile, so the touches don't click anything.
+    func startCalibration() {
+        guard !calibrating else { return }
+        let bounds = CGDisplayBounds(Displays.target(preferred: config.displayID))
+        let session = CalibrationSession()
+        guard let first = session.current else { return }
+        calibrationSession = session
+        calibrating = true
+        calibrationMessage = nil
+        service.suspended = true
+        calibrationOverlay.show(bounds: bounds) { [weak self] in self?.endCalibration("Calibration cancelled.") }
+        calibrationOverlay.setTarget(first, step: 1, of: session.targets.count)
+        armCalibrationTimeout()
+        LogStore.shared.log("Calibration started")
+    }
+
+    func clearCalibration() {
+        config.calibration = nil
+        calibrationMessage = "Calibration cleared."
+    }
+
+    private func calibrationFeed(_ pts: [CGPoint]) {
+        guard var session = calibrationSession else { return }
+        let captured = session.feed(pts)
+        calibrationSession = session
+        guard captured else { return }
+        if let next = session.current {
+            calibrationOverlay.setTarget(next, step: session.index + 1, of: session.targets.count)
+            armCalibrationTimeout()
+        } else if let cal = session.result() {
+            config.calibration = cal
+            endCalibration(String(format: "Calibrated (fit error %.1f%% of the screen).", cal.rmsError(session.pairs) * 100))
+        } else {
+            endCalibration("Calibration failed: the touches didn't line up with the targets. Try again.")
+        }
+    }
+
+    private func armCalibrationTimeout() {
+        calibrationTimeout?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.endCalibration("Calibration timed out.") }
+        calibrationTimeout = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: item)
+    }
+
+    private func endCalibration(_ message: String) {
+        guard calibrating else { return }
+        calibrationTimeout?.cancel(); calibrationTimeout = nil
+        calibrationSession = nil
+        calibrationOverlay.hide()
+        service.suspended = false
+        calibrating = false
+        calibrationMessage = message
+        LogStore.shared.log(message)
     }
 
     func resetShortcuts() { config.resetBindings() }

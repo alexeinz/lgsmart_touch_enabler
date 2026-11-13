@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import TouchCore
 
@@ -9,6 +10,7 @@ USAGE: touchd [command]
   run (default)   Start the driver in the foreground (Ctrl-C to quit)
   status          Show permissions, display and configuration summary
   ddc [input HEX] Probe the monitor over DDC/CI (inputs, capabilities); optionally switch input
+  record [s] [f]  Record raw touches for s seconds (default 10) to a replayable trace file
   dump            Print raw HID values from the touchscreen (for debugging)
   config path     Print the config file location
   config print    Print the effective configuration as JSON
@@ -80,6 +82,25 @@ case "dump":
     let sig = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
     sig.setEventHandler { exit(0) }; sig.resume()
     print("Dumping raw HID values; Ctrl-C to stop.")
+    CFRunLoopRun()
+
+case "record":
+    // touchd record [seconds] [file] — saves raw contacts as a replayable trace.
+    let cfg = store.load()
+    let secs = args.count > 1 ? Double(args[1]) ?? 10 : 10
+    let out = args.count > 2 ? URL(fileURLWithPath: args[2]) : TouchTrace.newFileURL()
+    let src = HIDTouchSource()
+    let bounds = CGDisplayBounds(Displays.target(preferred: cfg.displayID))
+    let rec = TraceRecorder(rotation: cfg.rotation, bounds: bounds)
+    src.onChange = { pts in rec.add(pts) }
+    guard src.start(vendorID: cfg.vendorID, productID: cfg.productID) else {
+        fail("Could not open HID device. Grant Input Monitoring to your terminal.")
+    }
+    print("Recording for \(Int(secs)) s — start touching…")
+    DispatchQueue.main.asyncAfter(deadline: .now() + secs) {
+        do { try rec.trace.write(to: out); print("Saved \(rec.frameCount) frames to \(out.path)"); exit(0) }
+        catch { fail("Could not save: \(error.localizedDescription)") }
+    }
     CFRunLoopRun()
 
 case "run":

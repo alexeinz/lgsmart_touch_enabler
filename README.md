@@ -19,7 +19,11 @@ A userspace touch driver for macOS. It makes the touchscreen on the **LG 31.5" 4
 
 - Tap = click, drag = drag, hold = right-click, double-tap = double-click
 - Two-finger drag = scroll (with momentum after a flick), two-finger tap = right-click, two-finger pinch = zoom
+- Optional two-finger flick (Back/Forward) and two-finger double-tap (smart zoom) bindings
+- Settings → Test tab can **record a touch trace** (also `touchd record`) for replaying in tests
 - 3/4/5-finger swipes and 4-finger pinch fire **configurable keyboard shortcuts**
+- Optional **native gestures** (Settings → General, experimental): pinch and two-finger twist are sent as real trackpad zoom / rotate events, and 3 to 5 finger swipes drive Spaces and Mission Control so they follow the fingers. Off by default; the keyboard shortcuts remain the fallback
+- **Calibration** (Settings → General → Calibrate…): touch five targets and the app fits a correction for offset, scale, skew, mirroring and rotation
 - Up to 10 simultaneous contacts are tracked
 - **Touch helpers** (Settings → Windows): tap magnet that snaps to small buttons, finger ripples, triple-tap selects a line, hold-then-drag selects text, snap/tile windows by dragging a title bar to an edge or corner (double-tap a title bar to maximize), optional edge/corner grab-to-resize and three-finger window drag. These use the Accessibility API and are **not yet verified on the real monitor**
 - Optional **edge swipes**: one finger from a screen edge inward fires a shortcut (off by default)
@@ -27,7 +31,7 @@ A userspace touch driver for macOS. It makes the touchscreen on the **LG 31.5" 4
 - **Test** tab: live view of every contact, **Logs** tab, and a **Monitor** tab (input switch, resolution, volume)
 - Config is one JSON file, live-reloaded by the daemon
 
-> **Status:** single-touch and two-finger scroll are confirmed on hardware. Multi-finger gestures (pinch, 3/4/5-finger swipes) are covered by unit tests but **not yet verified on the real monitor**. Expect to tweak sensitivity.
+> **Status:** single-touch and two-finger scroll are confirmed on hardware. Multi-finger gestures (pinch, 3/4/5-finger swipes) are covered by unit tests but **not yet verified on the real monitor**. Expect to tweak sensitivity. Native gestures and the calibration screen are new and **untested on the real monitor**; native gestures rely on undocumented event fields, and the Spaces / Mission Control swipe in particular may not work or may run in the wrong direction on your macOS version.
 
 ## Requirements
 
@@ -77,10 +81,14 @@ Run only one of the app or the daemon at a time, since both would inject events.
 | 1 finger tap / drag / hold | click / drag / right-click |
 | 2 fingers drag | scroll (natural direction, invertible), coasts after a flick |
 | 2 fingers quick tap | right-click |
-| 2 fingers pinch in / out | ⌘− / ⌘= (zoom) |
+| 2 fingers quick flick left / right | off by default; bind to ⌘[ / ⌘] for browser Back / Forward |
+| 2 fingers double-tap | off by default; bind to a smart-zoom shortcut (a single tap then waits briefly before right-clicking) |
+| 2 fingers pinch in / out | ⌘− / ⌘= (zoom), or a real zoom gesture with native gestures on |
+| 2 fingers twist | rotate gesture (native gestures only) |
 | 3, 4 or 5 fingers swipe left / right | ⌃→ / ⌃← (next / previous Space) |
 | 3, 4 or 5 fingers swipe up | ⌃↑ (Mission Control) |
 | 3, 4 or 5 fingers swipe down | ⌃↓ (App Exposé) |
+| 3, 4 or 5 fingers swipe, native swipes on | Spaces / Mission Control follow the fingers (experimental; replaces the four rows above) |
 | 4 fingers pinch in / out | F4 / F11 (Launchpad / Show Desktop) |
 | 1 finger on a title bar, dragged to a screen edge or corner | snap to half / quarter / maximize |
 | 1 finger double-tap on a title bar | maximize / restore |
@@ -123,7 +131,7 @@ touchd config reset
 Sources/TouchCore/    gesture engine, config, HID source, CG event output (library, unit-tested)
 Sources/touchd/       CLI daemon
 Sources/TouchdApp/    SwiftUI menu-bar settings app
-Tests/TouchCoreTests/ Swift Testing suite (62 tests)
+Tests/TouchCoreTests/ Swift Testing suite (93 tests)
 scripts/              build-app.sh, setup-signing.sh, make-dmg.sh, install-launchagent.sh, test.sh
 legacy/               original single-file prototypes, kept for reference
 ```
@@ -144,6 +152,8 @@ swift build
 - **After an update the toggles are on but the app says "Missing":** the entries belong to an older, differently signed build. Click **Reset Permissions…** in the Permissions tab (or run `tccutil reset Accessibility com.touchd.app` and `tccutil reset ListenEvent com.touchd.app`), then grant again after the relaunch.
 - **Uninstalling:** use **Uninstall…** in the Permissions tab. It removes the login item and both permissions, then moves the app to the Trash. macOS keeps the permissions if you only drag the app to the Trash; the two `tccutil` commands above clean up afterwards. The config file is left in place.
 - **Touch lands on the wrong display or is rotated:** pick the display and rotation in Settings → General.
+- **Touch is offset, scaled or mirrored:** run **Calibrate…** in Settings → General and touch the five targets with one finger (Esc or a mouse click cancels). The result replaces the rotation setting; **Clear calibration** goes back to it. Calibration is rejected if a target was missed.
+- **Native gestures misbehave:** turn them off in Settings → General to return to keyboard shortcuts.
 - **Swipes do nothing:** see the Mission Control caveat above.
 - **Different monitor:** see [Adding another touch screen](docs/ADDING_SCREENS.md) (find the VID/PID, verify with `touchd dump`, map display and rotation).
 

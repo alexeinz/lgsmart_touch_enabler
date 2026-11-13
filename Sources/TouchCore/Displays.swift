@@ -37,6 +37,14 @@ public enum Displays {
         return ids.first(where: { CGDisplayIsBuiltin($0) == 0 }) ?? CGMainDisplayID()
     }
 
+    /// Maps a raw contact to a global screen point. A calibration replaces the rotation setting;
+    /// its result is clamped to the display.
+    public static func map(_ n: CGPoint, rotation: Int, calibration: Calibration?, bounds b: CGRect) -> CGPoint {
+        guard let cal = calibration else { return map(n, rotation: rotation, bounds: b) }
+        let p = cal.apply(n)
+        return CGPoint(x: b.minX + min(max(p.x, 0), 1) * b.width, y: b.minY + min(max(p.y, 0), 1) * b.height)
+    }
+
     /// Maps a normalized (0...1, top-left origin) touch coordinate to global screen points,
     /// applying the panel rotation (degrees clockwise the panel is physically turned).
     public static func map(_ n: CGPoint, rotation: Int, bounds b: CGRect) -> CGPoint {
