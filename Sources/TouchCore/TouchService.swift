@@ -47,6 +47,7 @@ public final class TouchService {
                 return { item.cancel() }
             })
         cfgRef = { [unowned self] in self.config }
+        engine.dockEdge = { TouchService.autoHiddenDockEdge() }
         source.onChange = { [weak self] pts in self?.handle(pts) }
         source.onConnection = { [weak self] _ in self?.refreshStatus() }
     }
@@ -150,5 +151,16 @@ public final class TouchService {
         engine.displayBounds = bounds
         onScreenPoints?(pts)
         engine.update(points: pts, displayWidth: bounds.width)
+    }
+}
+
+
+extension TouchService {
+    /// The edge of an auto-hidden Dock, read from the Dock's preferences; nil if it is always visible.
+    static func autoHiddenDockEdge() -> GestureEngine.DockEdge? {
+        let dock = "com.apple.dock" as CFString
+        guard (CFPreferencesCopyAppValue("autohide" as CFString, dock) as? Bool) == true else { return nil }
+        let o = CFPreferencesCopyAppValue("orientation" as CFString, dock) as? String
+        return GestureEngine.DockEdge(rawValue: o ?? "bottom") ?? .bottom
     }
 }

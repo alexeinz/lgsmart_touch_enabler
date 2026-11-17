@@ -54,6 +54,7 @@ final class AppModel: ObservableObject {
         service.log = { LogStore.shared.log($0, .gesture) }
         LogStore.shared.log("LG Smart Touch Enabler started")
 
+        if clearStaleGrantsIfResigned() { return }
         if !Permissions.accessibilityGranted { Permissions.requestAccessibility() }
         Permissions.requestInputMonitoring()
         service.start()
@@ -122,6 +123,26 @@ final class AppModel: ObservableObject {
         task.arguments = ["-n", Bundle.main.bundlePath]
         try? task.run()
         NSApp.terminate(nil)
+    }
+
+    /// After an update signed with a different identity, macOS keeps showing the old grants as on while rejecting them.
+    /// Detect the change, clear the stale entries and relaunch once so the permission prompts appear fresh.
+    /// Returns true when it is relaunching.
+    private func clearStaleGrantsIfResigned() -> Bool {
+        guard let id = bundleID, canUninstall else { return false }
+        let key = "signingFingerprint"
+        let defaults = UserDefaults.standard
+        let current = Permissions.signingFingerprint()
+        let stored = defaults.string(forKey: key)
+        let stale = Permissions.shouldClearStaleGrants(stored: stored, current: current,
+                                                       accessibility: Permissions.accessibilityGranted,
+                                                       inputMonitoring: Permissions.inputMonitoringGranted)
+        if let current { defaults.set(current, forKey: key) }   // remember first, so this can never loop
+        guard stale else { return false }
+        LogStore.shared.log("Signing identity changed: clearing stale permissions", .warn)
+        Permissions.reset(bundleID: id)
+        relaunch()
+        return true
     }
 
     /// Nil when not running from a bundle (e.g. `swift run`), where there is nothing to reset or uninstall.

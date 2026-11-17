@@ -98,6 +98,7 @@ public struct TouchConfig: Codable, Equatable, Sendable {
     public var windowSnap = true               // drag a window to a screen edge/corner to tile it; double-tap title bar maximizes
     public var touchMagnet = true              // taps near a small control snap to it
     public var touchRipple = true              // brief circle at each new contact
+    public var revealDock = true               // touching the Dock's screen edge moves the pointer there so an auto-hidden Dock appears
     public var dragLock = false                // lifting during a drag keeps it held for dragLockTimeout; touch again to continue
     public var dragLockTimeout = 1.5           // seconds
     public var holdToSelect = false            // hold, then drag selects by word; right-click moves to release
@@ -186,6 +187,7 @@ public struct TouchConfig: Codable, Equatable, Sendable {
         windowSnap = try c.decodeIfPresent(Bool.self, forKey: .windowSnap) ?? d.windowSnap
         touchMagnet = try c.decodeIfPresent(Bool.self, forKey: .touchMagnet) ?? d.touchMagnet
         touchRipple = try c.decodeIfPresent(Bool.self, forKey: .touchRipple) ?? d.touchRipple
+        revealDock = try c.decodeIfPresent(Bool.self, forKey: .revealDock) ?? d.revealDock
         dragLock = try c.decodeIfPresent(Bool.self, forKey: .dragLock) ?? d.dragLock
         dragLockTimeout = try c.decodeIfPresent(Double.self, forKey: .dragLockTimeout) ?? d.dragLockTimeout
         holdToSelect = try c.decodeIfPresent(Bool.self, forKey: .holdToSelect) ?? d.holdToSelect

@@ -163,3 +163,27 @@ import Testing
         #expect(r.sink.keys.isEmpty)
     }
 }
+
+@Suite struct DockRevealTests {
+    private func rig(_ edge: GestureEngine.DockEdge?, reveal: Bool = true) -> Rig {
+        let r = Rig { $0.revealDock = reveal }
+        r.engine.displayBounds = CGRect(x: 0, y: 0, width: 3000, height: 1700)
+        r.engine.dockEdge = { edge }
+        return r
+    }
+    @Test func touchAtBottomEdgeMovesPointerToEdge() {
+        let r = rig(.bottom)
+        r.touch([CGPoint(x: 1500, y: 1690)])
+        #expect(r.sink.events.contains(.mouse(.move, CGPoint(x: 1500, y: 1699), 1)))
+    }
+    @Test func touchAwayFromEdgeDoesNothing() {
+        let r = rig(.bottom)
+        r.touch([CGPoint(x: 1500, y: 800)])
+        #expect(!r.sink.kinds.contains(.move))
+    }
+    @Test func noRevealWhenDockNotAutoHiddenOrDisabled() {
+        let a = rig(nil); a.touch([CGPoint(x: 1500, y: 1690)])
+        let b = rig(.bottom, reveal: false); b.touch([CGPoint(x: 1500, y: 1690)])
+        #expect(!a.sink.kinds.contains(.move) && !b.sink.kinds.contains(.move))
+    }
+}

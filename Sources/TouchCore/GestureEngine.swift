@@ -41,6 +41,9 @@ public final class GestureEngine {
     public var windows: WindowService?
     /// Points per millimetre of the touch display (0 = unknown). Physical thresholds fall back to fractions of the width.
     public var pointsPerMM: CGFloat = 0
+    /// Which screen edge an auto-hidden Dock lives on, or nil when the Dock isn't auto-hidden. Read once per touch.
+    public var dockEdge: () -> DockEdge? = { nil }
+    public enum DockEdge: String, Sendable { case bottom, left, right }
 
     private var mode = Mode.idle
     private var twoMode = TwoMode.undecided
@@ -225,6 +228,7 @@ public final class GestureEngine {
         startPt = p; lastPt = p
         mode = .pending
         edgeStart = edgeZone(p, cfg)
+        revealDock(p, cfg)
         grabCandidate = nil; titleWin = nil
         if cfg.windowEdgeGrab, let w = windows, let info = w.window(at: p) {
             let e = GrabEdges.at(p, in: info.frame, zone: CGFloat(cfg.grabZone))
@@ -266,6 +270,19 @@ public final class GestureEngine {
         sink.mouse(.rightDown, at: startPt, clicks: 1)
         sink.mouse(.rightUp, at: startPt, clicks: 1)
         mode = .consumed
+    }
+
+    /// A finger can't hover, so an auto-hidden Dock never sees the pointer arrive. Put the pointer on the very edge.
+    private func revealDock(_ p: CGPoint, _ cfg: TouchConfig) {
+        let b = displayBounds
+        guard cfg.revealDock, b != .zero, let side = dockEdge() else { return }
+        let zone = max(CGFloat(cfg.edgeWidth) * b.width, 40)
+        switch side {
+        case .bottom where b.maxY - p.y <= zone: sink.mouse(.move, at: CGPoint(x: p.x, y: b.maxY - 1), clicks: 1)
+        case .left where p.x - b.minX <= zone: sink.mouse(.move, at: CGPoint(x: b.minX, y: p.y), clicks: 1)
+        case .right where b.maxX - p.x <= zone: sink.mouse(.move, at: CGPoint(x: b.maxX - 1, y: p.y), clicks: 1)
+        default: break
+        }
     }
 
     /// Which enabled edge zone `p` starts in, if any.

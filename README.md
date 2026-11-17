@@ -134,7 +134,7 @@ touchd config reset
 Sources/TouchCore/    gesture engine, config, HID source, CG event output (library, unit-tested)
 Sources/touchd/       CLI daemon
 Sources/TouchdApp/    SwiftUI menu-bar settings app
-Tests/TouchCoreTests/ Swift Testing suite (104 tests)
+Tests/TouchCoreTests/ Swift Testing suite (106 tests)
 scripts/              build-app.sh, setup-signing.sh, make-dmg.sh, install-launchagent.sh, test.sh
 legacy/               original single-file prototypes, kept for reference
 ```

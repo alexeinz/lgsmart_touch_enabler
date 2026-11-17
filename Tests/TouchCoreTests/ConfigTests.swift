@@ -2,6 +2,18 @@ import CoreGraphics
 import Testing
 @testable import TouchCore
 
+@Suite struct StaleGrantTests {
+    @Test func clearsWhenIdentityChangedAndGrantMissing() {
+        #expect(Permissions.shouldClearStaleGrants(stored: "a", current: "b", accessibility: false, inputMonitoring: true))
+        #expect(Permissions.shouldClearStaleGrants(stored: nil, current: "b", accessibility: true, inputMonitoring: false))
+    }
+    @Test func leavesWorkingOrUnchangedGrantsAlone() {
+        #expect(!Permissions.shouldClearStaleGrants(stored: "a", current: "b", accessibility: true, inputMonitoring: true))
+        #expect(!Permissions.shouldClearStaleGrants(stored: "b", current: "b", accessibility: false, inputMonitoring: false))
+        #expect(!Permissions.shouldClearStaleGrants(stored: "a", current: nil, accessibility: false, inputMonitoring: false))
+    }
+}
+
 @Suite struct PermissionsTests {
     @Test func resetCoversBothGrantsForTheBundle() {
         #expect(Permissions.resetArguments(bundleID: "com.example.app") == [

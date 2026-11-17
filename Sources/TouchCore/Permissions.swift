@@ -69,6 +69,35 @@ public enum Permissions {
         return ok
     }
 
+    /// Identifies who signed the running binary: the leaf certificate for a real identity, the code hash for ad-hoc.
+    /// macOS ties privacy grants to this, so when it changes the old grants silently stop matching.
+    public static func signingFingerprint() -> String? {
+        var code: SecCode?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
+        var info: CFDictionary?
+        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+              let d = info as? [String: Any] else { return nil }
+        if let certs = d[kSecCodeInfoCertificates as String] as? [SecCertificate], let leaf = certs.first {
+            let data = SecCertificateCopyData(leaf) as Data
+            return "cert:" + data.hashHex
+        }
+        if let h = d[kSecCodeInfoUnique as String] as? Data { return "cdhash:" + h.hashHex }
+        return nil
+    }
+
+    /// True when the signing identity changed since the last launch and a grant is missing, which means the
+    /// missing grant is almost certainly a stale entry left by the previous identity and must be cleared.
+    public static func shouldClearStaleGrants(stored: String?, current: String?, accessibility: Bool, inputMonitoring: Bool) -> Bool {
+        guard let current, stored != current else { return false }
+        return !accessibility || !inputMonitoring
+    }
+
     public static let accessibilitySettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
     public static let inputMonitoringSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
+}
+
+private extension Data {
+    var hashHex: String { map { String(format: "%02x", $0) }.joined() }
 }
